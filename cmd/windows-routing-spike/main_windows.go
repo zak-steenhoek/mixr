@@ -433,22 +433,21 @@ func commandSetApp(args []string) error {
 	}
 	fmt.Fprintln(os.Stderr, "WARNING: using undocumented Windows.Media.Internal.AudioPolicyConfig; runtime behavior is Windows-build dependent.")
 	return withPolicyFactory(func(p *iAudioPolicyConfigFactory) error {
-		// Windows Volume Mixer stores the per-application playback preference for
-		// the multimedia role. Build 26200 rejects eConsole with E_INVALIDARG.
-		role := uintptr(eRoleMultimedia)
-		hr, _, _ := syscall.Syscall6(p.rawVTable.setPersistedDefaultAudioEndpoint, 5, uintptr(unsafe.Pointer(p)), uintptr(pid), eRender, role, h, 0)
-		if int32(hr) < 0 {
-			return fmt.Errorf("SetPersistedDefaultAudioEndpoint role %d HRESULT 0x%08x", role, uint32(hr))
-		}
-		var got uintptr
-		hr, _, _ = syscall.Syscall6(p.rawVTable.getPersistedDefaultAudioEndpoint, 5, uintptr(unsafe.Pointer(p)), uintptr(pid), eRender, role, uintptr(unsafe.Pointer(&got)), 0)
-		if int32(hr) < 0 {
-			return fmt.Errorf("verify GetPersistedDefaultAudioEndpoint role %d HRESULT 0x%08x", role, uint32(hr))
-		}
-		gotValue := hstringValue(got)
-		deleteHString(got)
-		if gotValue != value {
-			return fmt.Errorf("persisted multimedia endpoint read-back %q, want %q", gotValue, value)
+		for role := uintptr(eRoleConsole); role <= uintptr(eRoleCommunications); role++ {
+			hr, _, _ := syscall.Syscall6(p.rawVTable.setPersistedDefaultAudioEndpoint, 5, uintptr(unsafe.Pointer(p)), uintptr(pid), eRender, role, h, 0)
+			if int32(hr) < 0 {
+				return fmt.Errorf("SetPersistedDefaultAudioEndpoint role %d HRESULT 0x%08x", role, uint32(hr))
+			}
+			var got uintptr
+			hr, _, _ = syscall.Syscall6(p.rawVTable.getPersistedDefaultAudioEndpoint, 5, uintptr(unsafe.Pointer(p)), uintptr(pid), eRender, role, uintptr(unsafe.Pointer(&got)), 0)
+			if int32(hr) < 0 {
+				return fmt.Errorf("verify GetPersistedDefaultAudioEndpoint role %d HRESULT 0x%08x", role, uint32(hr))
+			}
+			gotValue := hstringValue(got)
+			deleteHString(got)
+			if gotValue != value {
+				return fmt.Errorf("persisted role %d endpoint read-back %q, want %q", role, gotValue, value)
+			}
 		}
 		return nil
 	})
