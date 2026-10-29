@@ -34,9 +34,11 @@ const (
 )
 
 var (
-	// Undocumented PolicyConfig COM contract used by the Windows Sound UI.
-	clsidPolicyConfigVista = ole.NewGUID("{294935CE-F637-4E7C-A41B-AB255460B862}")
-	iidPolicyConfigVista   = ole.NewGUID("{568B9108-44BF-40B4-9006-86AFE5B5A620}")
+	// Undocumented PolicyConfig COM contract used by current Windows Sound UI.
+	// The older Vista class/interface pair returned S_OK but made no change on
+	// Windows build 26200, so every mutation is also verified through MMDevice.
+	clsidPolicyConfigClient = ole.NewGUID("{870AF99C-171D-4F9E-AF0D-E63DF40C2BC9}")
+	iidPolicyConfig         = ole.NewGUID("{F8679F50-850A-41CF-9C72-430F290290C8}")
 
 	// Undocumented WinRT policy factory. This is intentionally isolated here.
 	iidAudioPolicyConfigFactory = ole.NewGUID("{AB3D4648-E242-459F-B02F-541C70306324}")
@@ -61,8 +63,8 @@ type audioPolicyConfigFactoryVtbl struct {
 	clearAllPersistedApplicationDefaultEndpoints uintptr
 }
 
-type iPolicyConfigVista struct{ rawVTable *policyConfigVistaVtbl }
-type policyConfigVistaVtbl struct {
+type iPolicyConfig struct{ rawVTable *policyConfigVtbl }
+type policyConfigVtbl struct {
 	queryInterface, addRef, release                                uintptr
 	getMixFormat, getDeviceFormat, resetDeviceFormat               uintptr
 	setDeviceFormat, getProcessingPeriod, setProcessingPeriod      uintptr
@@ -233,7 +235,7 @@ func commandSetDefault(args []string) error {
 	if len(args) != 1 {
 		return errors.New("usage: set-default <endpoint-id>")
 	}
-	fmt.Fprintln(os.Stderr, "WARNING: using undocumented IPolicyConfigVista; verify the result with 'default'.")
+	fmt.Fprintln(os.Stderr, "WARNING: using undocumented IPolicyConfig; the command will verify every role by reading it back.")
 	if err := ole.CoInitializeEx(0, ole.COINIT_MULTITHREADED); err != nil {
 		var oe *ole.OleError
 		if !errors.As(err, &oe) || oe.Code() != 1 {
@@ -241,8 +243,8 @@ func commandSetDefault(args []string) error {
 		}
 	}
 	defer ole.CoUninitialize()
-	var p *iPolicyConfigVista
-	if err := wca.CoCreateInstance(clsidPolicyConfigVista, 0, clsctxAll, iidPolicyConfigVista, &p); err != nil {
+	var p *iPolicyConfig
+	if err := wca.CoCreateInstance(clsidPolicyConfigClient, 0, clsctxAll, iidPolicyConfig, &p); err != nil {
 		return err
 	}
 	defer release(unsafe.Pointer(p), p.rawVTable.release)
@@ -256,7 +258,28 @@ func commandSetDefault(args []string) error {
 			return fmt.Errorf("SetDefaultEndpoint role %d HRESULT 0x%08x", role, uint32(hr))
 		}
 	}
-	return nil
+	return verifyDefaultRoles(args[0])
+}
+
+func verifyDefaultRoles(want string) error {
+	return withCOM(func(e *wca.IMMDeviceEnumerator) error {
+		for role := uint32(0); role < 3; role++ {
+			var d *wca.IMMDevice
+			if err := e.GetDefaultAudioEndpoint(eRender, role, &d); err != nil {
+				return fmt.Errorf("verify default role %d: %w", role, err)
+			}
+			var got string
+			err := d.GetId(&got)
+			d.Release()
+			if err != nil {
+				return fmt.Errorf("verify default role %d ID: %w", role, err)
+			}
+			if got != want {
+				return fmt.Errorf("SetDefaultEndpoint returned success but role %d remained %q", role, got)
+			}
+		}
+		return nil
+	})
 }
 
 func commandGetApp(args []string) error {
