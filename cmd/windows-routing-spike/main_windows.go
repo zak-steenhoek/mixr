@@ -15,6 +15,7 @@ import (
 	"unsafe"
 
 	ole "github.com/go-ole/go-ole"
+	ps "github.com/mitchellh/go-ps"
 	wca "github.com/moutend/go-wca"
 )
 
@@ -92,6 +93,8 @@ func main() {
 		err = listEndpoints()
 	case "default":
 		err = printDefaults()
+	case "sessions":
+		err = listSessions()
 	case "set-default":
 		err = commandSetDefault(flag.Args()[1:])
 	case "get-app":
@@ -116,6 +119,7 @@ func usage() {
 Public Core Audio probes:
   windows-routing-spike list
   windows-routing-spike default
+  windows-routing-spike sessions
 
 EXPERIMENTAL, undocumented/version-sensitive policy calls:
   windows-routing-spike set-default <endpoint-id>
@@ -229,6 +233,106 @@ func printDefaults() error {
 		}
 		return nil
 	})
+}
+
+func listSessions() error {
+	return withCOM(func(e *wca.IMMDeviceEnumerator) error {
+		var c *wca.IMMDeviceCollection
+		if err := e.EnumAudioEndpoints(eRender, deviceStateActive, &c); err != nil {
+			return err
+		}
+		defer c.Release()
+		var n uint32
+		if err := c.GetCount(&n); err != nil {
+			return err
+		}
+		for i := uint32(0); i < n; i++ {
+			var d *wca.IMMDevice
+			if err := c.Item(i, &d); err != nil {
+				return err
+			}
+			if err := printEndpointSessions(d); err != nil {
+				d.Release()
+				return err
+			}
+			d.Release()
+		}
+		return nil
+	})
+}
+
+func printEndpointSessions(d *wca.IMMDevice) error {
+	var id string
+	if err := d.GetId(&id); err != nil {
+		return err
+	}
+	name := "<unknown>"
+	var store *wca.IPropertyStore
+	if err := d.OpenPropertyStore(stgmRead, &store); err == nil {
+		var value wca.PROPVARIANT
+		if store.GetValue(&wca.PKEY_Device_FriendlyName, &value) == nil {
+			name = value.String()
+		}
+		store.Release()
+	}
+
+	var manager *wca.IAudioSessionManager2
+	if err := activateSessionManager(d, &manager); err != nil {
+		return fmt.Errorf("activate session manager for %s: %w", name, err)
+	}
+	defer manager.Release()
+	var sessions *wca.IAudioSessionEnumerator
+	if err := manager.GetSessionEnumerator(&sessions); err != nil {
+		return err
+	}
+	defer sessions.Release()
+	var count int
+	if err := sessions.GetCount(&count); err != nil {
+		return err
+	}
+	for i := 0; i < count; i++ {
+		var control *wca.IAudioSessionControl
+		if err := sessions.GetSession(i, &control); err != nil {
+			return err
+		}
+		dispatch, err := control.QueryInterface(wca.IID_IAudioSessionControl2)
+		control.Release()
+		if err != nil {
+			return err
+		}
+		control2 := (*wca.IAudioSessionControl2)(unsafe.Pointer(dispatch))
+		var pid uint32
+		err = control2.GetProcessId(&pid)
+		control2.Release()
+		if err != nil || pid == 0 {
+			continue
+		}
+		processName := "<exited>"
+		if process, findErr := ps.FindProcess(int(pid)); findErr == nil && process != nil {
+			processName = process.Executable()
+		}
+		fmt.Printf("endpoint: %s\n  endpoint-id: %s\n  pid: %d\n  process: %s\n", name, id, pid, processName)
+	}
+	return nil
+}
+
+// activateSessionManager avoids the pinned go-wca Activate wrapper, which
+// incorrectly passes &ctx rather than ctx and fails on current Windows builds.
+func activateSessionManager(d *wca.IMMDevice, manager **wca.IAudioSessionManager2) error {
+	hr, _, _ := syscall.Syscall6(
+		d.VTable().Activate,
+		5,
+		uintptr(unsafe.Pointer(d)),
+		uintptr(unsafe.Pointer(wca.IID_IAudioSessionManager2)),
+		uintptr(clsctxAll),
+		0,
+		uintptr(unsafe.Pointer(manager)),
+		0,
+	)
+	if int32(hr) < 0 {
+		return fmt.Errorf("IMMDevice::Activate HRESULT 0x%08x", uint32(hr))
+	}
+	return nil
 }
 
 func commandSetDefault(args []string) error {
