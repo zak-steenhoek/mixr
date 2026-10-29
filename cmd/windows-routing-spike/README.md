@@ -16,3 +16,8 @@ This is an experiment dependency constraint, not a Windows Core Audio limit.
 
 Run `windows-routing-spike.exe` without arguments for commands. Read
 `docs/WINDOWS_ROUTING_SPIKE.md` before invoking policy-changing commands.
+
+`sessions` is read-only and lists the Core Audio session PID and endpoint for
+each active render endpoint. On Windows 25H2, `set-app` accepts the shorter
+endpoint ID printed by `list` and converts it to the render interface path used
+by the internal policy service.

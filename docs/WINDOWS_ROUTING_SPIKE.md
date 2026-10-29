@@ -14,7 +14,7 @@ Policy-changing commands print warnings. Record the output of `default` and
 | Enumerate render endpoints, state, friendly name, endpoint ID | `IMMDeviceEnumerator`, `IMMDevice`, `IPropertyStore` | Documented public Core Audio API |
 | Read defaults by role | `IMMDeviceEnumerator::GetDefaultAudioEndpoint` | Documented public Core Audio API |
 | Observe endpoint/default changes | `IMMNotificationClient` (not needed by this one-shot CLI) | Documented public Core Audio API |
-| Change system defaults | `IPolicyConfigVista::SetDefaultEndpoint` | Undocumented COM interface; version-sensitive and unsupported as an application contract |
+| Change system defaults | `IPolicyConfig::SetDefaultEndpoint` | Undocumented COM interface; version-sensitive and unsupported as an application contract |
 | Read/set persisted per-app defaults | `Windows.Media.Internal.AudioPolicyConfig` / `IAudioPolicyConfigFactory` | Undocumented WinRT interface; version-sensitive and unsupported as an application contract |
 
 Primary Microsoft references:
@@ -36,6 +36,9 @@ prints the broadly available endpoint ID and treats it as installation-local.
 - Windows persists a preferred endpoint by application identity. The experiment
   accepts a PID because the internal policy service resolves identity from a
   currently running process.
+- On the tested Windows 25H2 build, per-app policy stores the render device
+  interface path (`\\?\SWD#MMDEVAPI#...`) rather than the shorter endpoint ID
+  returned by `IMMDevice::GetId`. The CLI converts the latter before setting.
 - A new or recreated stream should select the persisted preferred endpoint when
   the app uses the system default-selection path.
 - An existing stream may remain on its original endpoint. Immediate movement is
@@ -80,7 +83,20 @@ System-default mutation test (optional): save all three role values, run
 `set-default <id>`, verify with `default` and Windows Settings, then restore the
 original endpoint ID. The command changes all three render roles.
 
-## Actual results (2026-10-28)
+## Physical validation environment
+
+Validation was completed on 2026-10-29 using Windows 25H2 build `26200.9711`:
+
+| Purpose | Windows endpoint | Endpoint ID |
+|---|---|---|
+| Sony WH-XB910N headphones through Realtek headphone output | `Realtek HD Audio 2nd output (Realtek(R) Audio)` | `{0.0.0.00000000}.{3a66bf09-fed7-4d59-8132-4b0ade73df37}` |
+| UE Boom 2 through Realtek speaker output | `Speakers (Realtek(R) Audio)` | `{0.0.0.00000000}.{b161a7f4-3a85-4399-bbee-9eaf5d947a2d}` |
+
+Chrome was the control application on the Windows default headphones. Spotify
+was the routed application on the speakers. The existing Nano R4 and four-pot
+deej setup remained running during live routing and application-restart tests.
+
+## Actual results (2026-10-29)
 
 - The 32-bit source compiled with Go 1.27.3. An initial 64-bit run crashed in
   the pinned 2019 `go-wca` dependency because its `IMMDevice::GetId` wrapper
@@ -91,13 +107,61 @@ original endpoint ID. The command changes all three render roles.
   not-present, and unplugged states. It reported two active Realtek endpoints.
 - `default` successfully read separate role assignments: Speakers (Realtek) for
   console/multimedia and Realtek HD Audio 2nd output for communications.
-- `get-app` reached the internal policy factory without crashing. A read against
-  the host PowerShell process returned `E_INVALIDARG` for all roles, which is
-  expected evidence that an arbitrary non-audio PID is not a valid functional
-  test. A running Spotify audio-process PID is still required.
-- Physical separation, live stream migration, unplug/replug, application restart,
-  and reboot persistence have **not** been claimed. They require the explicit
-  manual procedure above with two known physical endpoints.
+- The Vista-era PolicyConfig class returned success without changing the default
+  endpoint on this Windows build. Switching to the current `IPolicyConfig` class
+  and adding read-back verification changed all three default roles correctly.
+- Chrome and Spotify both moved from speakers to the headphone default
+  immediately while already playing; no pause, restart, or stream recreation was
+  needed.
+- The read-only `sessions` command identified Spotify's actual Core Audio session
+  PID and showed that Windows can retain stale session records on both endpoints
+  after a move. Physical listening, rather than session presence alone, was used
+  to determine the active route.
+- Initial per-app writes failed with `E_INVALIDARG` because the internal API
+  expects the full render interface path. Windows Volume Mixer supplied the
+  comparator value, after which endpoint-ID conversion and all-role read-back
+  verification were added to the CLI.
+- `set-app` then routed already-playing Spotify to the UE Boom speakers
+  immediately while Chrome continued through the Sony headphones. No glitch,
+  silence, duplication, pause, or restart was observed.
+- `set-app <pid> default` cleared all three Spotify preferences and moved the
+  active stream back to the headphone default immediately. Reapplying the route
+  also moved it immediately.
+- deej remained running through the live routing changes. The Spotify pot
+  controlled Spotify on speakers; the Chrome pot controlled Chrome on
+  headphones; and the master pot controlled only the default headphone endpoint.
+  Setting master to zero silenced Chrome without changing Spotify.
+- After fully exiting and reopening Spotify, Windows restored the speakers route
+  under the new PID and the still-running deej process automatically controlled
+  the recreated Spotify session.
+- After a Windows reboot, before deej was started, Spotify again opened on
+  speakers and Chrome on headphones. All three Spotify preferences were readable
+  under its new PID. Starting deej afterward restored all pot behavior without a
+  manual session refresh.
+- Unplugging the analog UE Boom cable made Spotify silent without falling back to
+  headphones; Chrome was unaffected. Windows continued reporting the onboard
+  Realtek speakers endpoint as active. Reconnecting the cable restored Spotify
+  immediately and deej control continued without further action.
+- The original configuration was restored and verified: Spotify has no persisted
+  override; console/multimedia defaults are Speakers (Realtek); communications
+  default is Realtek HD Audio 2nd output.
+
+## Validation matrix
+
+| Requirement | Result |
+|---|---|
+| Enumerate endpoints and IDs | Passed |
+| Read default roles | Passed |
+| Change all default roles with read-back | Passed on build 26200.9711 using undocumented `IPolicyConfig` |
+| Read/set/clear Spotify preferred endpoint | Passed on build 26200.9711 using undocumented `IAudioPolicyConfigFactory` |
+| Spotify on speakers while Chrome stays on headphones | Physically confirmed |
+| Move an already-playing application | Immediate for Spotify and Chrome in this test |
+| Preserve independent deej application volume control | Passed |
+| Preserve default-endpoint master isolation | Passed |
+| Persist across Spotify restart/session recreation | Passed |
+| Persist across Windows reboot | Passed |
+| Analog cable disconnect/reconnect | Silence without fallback; immediate recovery on reconnect |
+| True endpoint removal or disable | Not tested |
 
 ## Feasibility conclusion and risks
 
@@ -105,10 +169,21 @@ Public APIs are sufficient for discovery, stable-enough installation-local IDs,
 reading defaults, and notifications. They are not sufficient for a supported
 implementation that changes the user's system or per-app default endpoint.
 
-The experimental policy calls can establish practical feasibility on tested
-Windows builds, but shipping them creates compatibility risk because Microsoft
-does not document their ABI or availability. A production design must feature-
-detect failures, preserve user settings, clearly label affected Windows builds,
-and retain a fallback that opens Windows Volume Mixer for user-managed routing.
-It must not promise immediate migration: the target application controls stream
-creation and may bind directly to a device.
+Persistent, independent per-application playback routing is practically feasible
+on the tested Windows 25H2 build. The primary success criterion was met, including
+application restart, Windows reboot, session recreation, and existing deej volume
+control.
+
+Shipping still creates compatibility risk because Microsoft does not document
+the mutation interfaces, their ABI, or availability. The experiment itself found
+three version/dependency sensitivities: the obsolete PolicyConfig class silently
+did nothing, the per-app setter required a render interface path rather than the
+ordinary endpoint ID, and the pinned `go-wca` wrappers contain unsafe 64-bit and
+`IMMDevice::Activate` defects.
+
+A production design must feature-detect failures, verify every mutation by
+reading it back, preserve and restore user settings, enumerate actual Core Audio
+session PIDs, and retain a Windows Volume Mixer fallback. Immediate migration was
+observed here but cannot be promised for every application or audio API. True
+endpoint disappearance remains unresolved because unplugging an analog cable did
+not remove the onboard Realtek endpoint from Windows.
