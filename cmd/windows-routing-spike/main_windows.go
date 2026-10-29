@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -32,6 +33,7 @@ const (
 	stgmRead              = 0
 	clsctxAll             = 23
 	roInitMultithreaded   = 1
+	audioRenderClassID    = "{e6327cad-dcec-4949-ae8a-991e976a79d2}"
 )
 
 var (
@@ -417,15 +419,18 @@ func commandSetApp(args []string) error {
 	if err != nil {
 		return err
 	}
-	value := args[1]
-	if value == "default" {
-		value = ""
-	}
-	h, err := newHString(value)
+	value, err := appRoutingDeviceID(args[1])
 	if err != nil {
 		return err
 	}
-	defer deleteHString(h)
+	var h uintptr
+	if value != "" {
+		h, err = newHString(value)
+		if err != nil {
+			return err
+		}
+		defer deleteHString(h)
+	}
 	fmt.Fprintln(os.Stderr, "WARNING: using undocumented Windows.Media.Internal.AudioPolicyConfig; runtime behavior is Windows-build dependent.")
 	return withPolicyFactory(func(p *iAudioPolicyConfigFactory) error {
 		// Windows Volume Mixer stores the per-application playback preference for
@@ -447,6 +452,22 @@ func commandSetApp(args []string) error {
 		}
 		return nil
 	})
+}
+
+func appRoutingDeviceID(value string) (string, error) {
+	if value == "default" {
+		// The internal API expects a null HSTRING, not an allocated empty one.
+		return "", nil
+	}
+	if strings.HasPrefix(value, `\\?\SWD#MMDEVAPI#`) {
+		return value, nil
+	}
+	if strings.HasPrefix(value, "{0.0.0.") {
+		// Windows 25H2 persists the render interface path rather than the shorter
+		// IMMDevice endpoint ID returned by GetId.
+		return `\\?\SWD#MMDEVAPI#` + value + "#" + audioRenderClassID, nil
+	}
+	return "", fmt.Errorf("unsupported app-routing device ID %q", value)
 }
 
 func clearApps() error {
