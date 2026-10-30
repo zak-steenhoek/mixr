@@ -158,6 +158,14 @@ both immediate suppression and the delayed resend. The D5 behavior requires
 physical revalidation with repeated external Spotify mute changes before this
 checkpoint can pass.
 
+After rebuilding the host with the bounded resend, the user confirmed that D5
+followed repeated external Spotify mute changes and that the previously observed
+stale-indicator behavior no longer reproduced. This physically validates the
+two-second self-healing mitigation on the tested hardware. Together with the
+previous report, external synchronization for D3, D5, and D7 plus USB
+disconnect/reconnect recovery now pass. Integrated microphone removal/
+restoration and the combined ten-minute soak remain open.
+
 ### Automated integration validation
 
 On 2026-10-30, both `GOARCH=386` and `GOARCH=amd64` passed the full Go test
