@@ -110,6 +110,19 @@ deployment were not redesigned.
 
 These automated checks are not a physical regression pass.
 
+## Practical regression result
+
+On 2026-10-30, the user completed a practical regression of Track C1 and
+reported that the dedicated mixr icon displayed correctly, the application
+started and operated normally, and the existing hardware and audio controls
+remained operational. This provides the required integration evidence for the
+identity migration.
+
+The practical run was a focused regression of the established application and
+hardware behavior, not a claim that every edge case or every checklist item
+below was independently retested. The automated 386/amd64 matrix remains the
+detailed evidence for architecture-specific builds and compatibility guards.
+
 ## Manual Windows and Nano R4 regression
 
 Record the Windows version/build, mixr commit, executable architecture, Nano R4
@@ -146,4 +159,5 @@ observed result, and any untested item.
 - [ ] If a Windows Startup-folder shortcut exists, confirm it targets
   `mixr.exe` and launches normally after sign-in.
 
-Do not merge or tag this branch until the physical checklist is recorded.
+The successful practical regression above authorizes C1 integration. Retain
+this checklist for future release-level or issue-specific regression passes.
