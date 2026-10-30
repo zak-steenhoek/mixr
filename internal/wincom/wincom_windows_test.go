@@ -123,14 +123,14 @@ func TestVolumeOperationsUseFloat32ABI(t *testing.T) {
 		IUnknown: ole.IUnknown{RawVTable: (*interface{})(unsafe.Pointer(endpointVTable))},
 	}
 
-	if err := endpoint.SetMasterVolumeLevelScalar(0.64, nil); err != nil {
+	if err := SetEndpointVolumeLevelScalar(endpoint, 0.64, nil); err != nil {
 		t.Fatal(err)
 	}
 	if fakeEndpointVolume != float32(0.64) {
 		t.Fatalf("endpoint set volume = %f, want 0.64", fakeEndpointVolume)
 	}
-	var endpointLevel float32
-	if err := endpoint.GetMasterVolumeLevelScalar(&endpointLevel); err != nil {
+	endpointLevel, err := EndpointVolumeLevelScalar(endpoint)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if endpointLevel != float32(0.73) {

@@ -27,3 +27,5 @@ hardware_mute_prototype:
   enabled: true
   target: spotify.exe
   poll_interval_ms: 500
+  microphone_level_inverted: false
+  microphone_level_deadband: 12

@@ -13,6 +13,9 @@ func TestParsePrototypeSerialLine(t *testing.T) {
 		{name: "switch open", line: "mixr:v1:event:switch:spotify-mute:0\r\n", want: PrototypeSerialEvent{Kind: PrototypeSerialSwitchEvent, ControlID: prototypeSpotifyMuteControl}, valid: true},
 		{name: "switch closed", line: "mixr:v1:event:switch:spotify-mute:1\n", want: PrototypeSerialEvent{Kind: PrototypeSerialSwitchEvent, ControlID: prototypeSpotifyMuteControl, SwitchClosed: true}, valid: true},
 		{name: "master switch closed", line: "mixr:v1:event:switch:master-mute:1\n", want: PrototypeSerialEvent{Kind: PrototypeSerialSwitchEvent, ControlID: prototypeMasterMuteControl, SwitchClosed: true}, valid: true},
+		{name: "microphone switch", line: "mixr:v1:event:switch:microphone-mute:1\n", want: PrototypeSerialEvent{Kind: PrototypeSerialSwitchEvent, ControlID: prototypeMicrophoneMuteControl, SwitchClosed: true}, valid: true},
+		{name: "microphone analog", line: "mixr:v1:event:analog:microphone-level:512\n", want: PrototypeSerialEvent{Kind: PrototypeSerialAnalogEvent, ControlID: prototypeMicrophoneLevelControl, AnalogValue: 512}, valid: true},
+		{name: "microphone analog too high", line: "mixr:v1:event:analog:microphone-level:1024\n", valid: false},
 		{name: "legacy analog", line: "10|20|30|40\r\n", valid: false},
 		{name: "future version", line: "mixr:v2:ready\r\n", valid: false},
 		{name: "invalid state", line: "mixr:v1:event:switch:spotify-mute:true\r\n", valid: false},
@@ -41,5 +44,8 @@ func TestPrototypeIndicatorMessage(t *testing.T) {
 	}
 	if got := prototypeIndicatorMessage(prototypeMasterMuteControl, true); got != "mixr:v1:state:indicator:master-mute:1" {
 		t.Fatalf("master on message = %q", got)
+	}
+	if got := prototypeIndicatorMessage(prototypeMicrophoneMuteControl, true); got != "mixr:v1:state:indicator:microphone-mute:1" {
+		t.Fatalf("microphone on message = %q", got)
 	}
 }

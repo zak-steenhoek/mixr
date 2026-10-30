@@ -7,6 +7,7 @@ package wincom
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"runtime"
 	"syscall"
@@ -203,6 +204,49 @@ func SetEndpointVolumeMute(volume *wca.IAudioEndpointVolume, muted bool, eventCo
 	runtime.KeepAlive(eventContext)
 
 	return hresult("IAudioEndpointVolume::SetMute", hr)
+}
+
+// EndpointVolumeLevelScalar reads an endpoint's normalized 0..1 volume using
+// the native FLOAT output type.
+func EndpointVolumeLevelScalar(volume *wca.IAudioEndpointVolume) (float32, error) {
+	if volume == nil {
+		return 0, fmt.Errorf("IAudioEndpointVolume::GetMasterVolumeLevelScalar: nil volume")
+	}
+
+	var level float32
+	hr, _, _ := syscall.Syscall(
+		volume.VTable().GetMasterVolumeLevelScalar,
+		2,
+		uintptr(unsafe.Pointer(volume)),
+		uintptr(unsafe.Pointer(&level)),
+		0,
+	)
+	runtime.KeepAlive(volume)
+
+	if err := hresult("IAudioEndpointVolume::GetMasterVolumeLevelScalar", hr); err != nil {
+		return 0, err
+	}
+	return level, nil
+}
+
+// SetEndpointVolumeLevelScalar writes a normalized endpoint volume using the
+// native FLOAT argument representation and the caller's event context.
+func SetEndpointVolumeLevelScalar(volume *wca.IAudioEndpointVolume, level float32, eventContext *ole.GUID) error {
+	if volume == nil {
+		return fmt.Errorf("IAudioEndpointVolume::SetMasterVolumeLevelScalar: nil volume")
+	}
+
+	hr, _, _ := syscall.Syscall(
+		volume.VTable().SetMasterVolumeLevelScalar,
+		3,
+		uintptr(unsafe.Pointer(volume)),
+		uintptr(math.Float32bits(level)),
+		uintptr(unsafe.Pointer(eventContext)),
+	)
+	runtime.KeepAlive(volume)
+	runtime.KeepAlive(eventContext)
+
+	return hresult("IAudioEndpointVolume::SetMasterVolumeLevelScalar", hr)
 }
 
 // UnregisterEndpointNotificationCallback fills the E_NOTIMPL gap in the pinned

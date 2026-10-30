@@ -36,12 +36,14 @@ func TestSerialLineParsingKeepsLegacyFramesSeparate(t *testing.T) {
 	sio.handleLine(sio.logger, "0|256|512|1023\r\n")
 	sio.handleLine(sio.logger, "mixr:v1:event:switch:spotify-mute:1\r\n")
 	sio.handleLine(sio.logger, "mixr:v1:event:switch:master-mute:0\r\n")
+	sio.handleLine(sio.logger, "mixr:v1:event:switch:microphone-mute:1\r\n")
+	sio.handleLine(sio.logger, "mixr:v1:event:analog:microphone-level:512\r\n")
 
 	if len(sliderEvents) != 4 {
 		t.Fatalf("legacy slider event count = %d, want 4", len(sliderEvents))
 	}
-	if len(prototypeEvents) != 3 {
-		t.Fatalf("prototype event count = %d, want ready + two switches", len(prototypeEvents))
+	if len(prototypeEvents) != 5 {
+		t.Fatalf("prototype event count = %d, want ready + three switches + analog", len(prototypeEvents))
 	}
 	ready := <-prototypeEvents
 	switchEvent := <-prototypeEvents
@@ -54,6 +56,14 @@ func TestSerialLineParsingKeepsLegacyFramesSeparate(t *testing.T) {
 	masterEvent := <-prototypeEvents
 	if masterEvent.Kind != PrototypeSerialSwitchEvent || masterEvent.ControlID != prototypeMasterMuteControl || masterEvent.SwitchClosed {
 		t.Fatalf("third prototype event = %#v, want open master switch", masterEvent)
+	}
+	microphoneEvent := <-prototypeEvents
+	if microphoneEvent.ControlID != prototypeMicrophoneMuteControl || !microphoneEvent.SwitchClosed {
+		t.Fatalf("fourth prototype event = %#v, want closed microphone switch", microphoneEvent)
+	}
+	analogEvent := <-prototypeEvents
+	if analogEvent.Kind != PrototypeSerialAnalogEvent || analogEvent.AnalogValue != 512 {
+		t.Fatalf("fifth prototype event = %#v, want A4 value 512", analogEvent)
 	}
 }
 
@@ -87,12 +97,20 @@ func TestPrototypeIndicatorSuppressesDuplicateWrites(t *testing.T) {
 	if err := sio.setPrototypeIndicator(prototypeMasterMuteControl, true); err != nil {
 		t.Fatal(err)
 	}
+	if err := sio.setPrototypeIndicator(prototypeMicrophoneMuteControl, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := sio.setPrototypeIndicator(prototypeMicrophoneMuteControl, true); err != nil {
+		t.Fatal(err)
+	}
 
 	want := []string{
 		"mixr:v1:state:indicator:spotify-mute:0\n",
 		"mixr:v1:state:indicator:spotify-mute:1\n",
 		"mixr:v1:state:indicator:master-mute:0\n",
 		"mixr:v1:state:indicator:master-mute:1\n",
+		"mixr:v1:state:indicator:microphone-mute:0\n",
+		"mixr:v1:state:indicator:microphone-mute:1\n",
 	}
 	if len(conn.writes) != len(want) {
 		t.Fatalf("write count = %d, want %d (%q)", len(conn.writes), len(want), conn.writes)
@@ -101,6 +119,40 @@ func TestPrototypeIndicatorSuppressesDuplicateWrites(t *testing.T) {
 		if conn.writes[index] != want[index] {
 			t.Fatalf("write %d = %q, want %q", index, conn.writes[index], want[index])
 		}
+	}
+}
+
+func TestPrototypeIndicatorPeriodicallyResendsUnchangedState(t *testing.T) {
+	conn := &recordingSerialConn{}
+	sio := &SerialIO{
+		logger:               zap.NewNop().Sugar(),
+		connected:            true,
+		prototypeReady:       true,
+		lifecycle:            1,
+		connectionGeneration: 1,
+		conn:                 conn,
+		lastIndicatorStates:  make(map[string]bool),
+		lastIndicatorSentAt:  make(map[string]time.Time),
+	}
+
+	if err := sio.setPrototypeIndicator(prototypeSpotifyMuteControl, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := sio.setPrototypeIndicator(prototypeSpotifyMuteControl, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(conn.writes) != 1 {
+		t.Fatalf("immediate duplicate write count = %d, want 1", len(conn.writes))
+	}
+
+	sio.stateMu.Lock()
+	sio.lastIndicatorSentAt[prototypeSpotifyMuteControl] = time.Now().Add(-prototypeIndicatorResyncInterval)
+	sio.stateMu.Unlock()
+	if err := sio.setPrototypeIndicator(prototypeSpotifyMuteControl, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(conn.writes) != 2 || conn.writes[1] != "mixr:v1:state:indicator:spotify-mute:1\n" {
+		t.Fatalf("periodic authoritative writes = %q, want repeated Spotify on", conn.writes)
 	}
 }
 
@@ -135,6 +187,7 @@ func TestSerialReconnectsAfterEstablishedConnectionLoss(t *testing.T) {
 	sio.stateMu.Lock()
 	sio.prototypeReady = true
 	sio.lastIndicatorStates[prototypeSpotifyMuteControl] = true
+	sio.lastIndicatorSentAt = map[string]time.Time{prototypeSpotifyMuteControl: time.Now()}
 	sio.stateMu.Unlock()
 	first.fail(io.ErrUnexpectedEOF)
 	deadline := time.Now().Add(2 * time.Second)
@@ -146,10 +199,11 @@ func TestSerialReconnectsAfterEstablishedConnectionLoss(t *testing.T) {
 		sio.stateMu.RLock()
 		ready := sio.prototypeReady
 		indicatorCount := len(sio.lastIndicatorStates)
+		indicatorTimestampCount := len(sio.lastIndicatorSentAt)
 		sio.stateMu.RUnlock()
 		if connected && generation == 2 {
-			if ready || indicatorCount != 0 {
-				t.Fatalf("reconnect retained prototype state: ready=%t indicators=%d", ready, indicatorCount)
+			if ready || indicatorCount != 0 || indicatorTimestampCount != 0 {
+				t.Fatalf("reconnect retained prototype state: ready=%t indicators=%d timestamps=%d", ready, indicatorCount, indicatorTimestampCount)
 			}
 			break
 		}
