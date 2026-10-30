@@ -94,18 +94,25 @@ func newMasterSession(
 }
 
 func (s *paSession) GetVolume() float32 {
+	level, err := s.CurrentVolume()
+	if err != nil {
+		s.logger.Warnw("Failed to get session volume", "error", err)
+	}
+	return level
+}
+
+func (s *paSession) CurrentVolume() (float32, error) {
 	request := proto.GetSinkInputInfo{
 		SinkInputIndex: s.sinkInputIndex,
 	}
 	reply := proto.GetSinkInputInfoReply{}
 
 	if err := s.client.Request(&request, &reply); err != nil {
-		s.logger.Warnw("Failed to get session volume", "error", err)
+		return 0, fmt.Errorf("get session volume: %w", err)
 	}
 
 	level := parseChannelVolumes(reply.ChannelVolumes)
-
-	return level
+	return level, nil
 }
 
 func (s *paSession) SetVolume(v float32) error {
@@ -125,6 +132,9 @@ func (s *paSession) SetVolume(v float32) error {
 	return nil
 }
 
+func (s *paSession) CurrentMute() (bool, error) { return false, ErrMuteUnsupported }
+func (s *paSession) SetMute(bool) error         { return ErrMuteUnsupported }
+
 func (s *paSession) Release() {
 	s.logger.Debug("Releasing audio session")
 }
@@ -134,6 +144,14 @@ func (s *paSession) String() string {
 }
 
 func (s *masterSession) GetVolume() float32 {
+	level, err := s.CurrentVolume()
+	if err != nil {
+		s.logger.Warnw("Failed to get session volume", "error", err)
+	}
+	return level
+}
+
+func (s *masterSession) CurrentVolume() (float32, error) {
 	var level float32
 
 	if s.isOutput {
@@ -143,8 +161,7 @@ func (s *masterSession) GetVolume() float32 {
 		reply := proto.GetSinkInfoReply{}
 
 		if err := s.client.Request(&request, &reply); err != nil {
-			s.logger.Warnw("Failed to get session volume", "error", err)
-			return 0
+			return 0, fmt.Errorf("get master sink volume: %w", err)
 		}
 
 		level = parseChannelVolumes(reply.ChannelVolumes)
@@ -155,14 +172,13 @@ func (s *masterSession) GetVolume() float32 {
 		reply := proto.GetSourceInfoReply{}
 
 		if err := s.client.Request(&request, &reply); err != nil {
-			s.logger.Warnw("Failed to get session volume", "error", err)
-			return 0
+			return 0, fmt.Errorf("get master source volume: %w", err)
 		}
 
 		level = parseChannelVolumes(reply.ChannelVolumes)
 	}
 
-	return level
+	return level, nil
 }
 
 func (s *masterSession) SetVolume(v float32) error {
@@ -194,6 +210,9 @@ func (s *masterSession) SetVolume(v float32) error {
 
 	return nil
 }
+
+func (s *masterSession) CurrentMute() (bool, error) { return false, ErrMuteUnsupported }
+func (s *masterSession) SetMute(bool) error         { return ErrMuteUnsupported }
 
 func (s *masterSession) Release() {
 	s.logger.Debug("Releasing audio session")

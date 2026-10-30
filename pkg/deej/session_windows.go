@@ -8,6 +8,7 @@ import (
 	ole "github.com/go-ole/go-ole"
 	ps "github.com/mitchellh/go-ps"
 	wca "github.com/moutend/go-wca"
+	"github.com/omriharel/deej/internal/wincom"
 	"go.uber.org/zap"
 )
 
@@ -109,13 +110,23 @@ func newMasterSession(
 }
 
 func (s *wcaSession) GetVolume() float32 {
-	var level float32
-
-	if err := s.volume.GetMasterVolume(&level); err != nil {
+	level, err := s.CurrentVolume()
+	if err != nil {
 		s.logger.Warnw("Failed to get session volume", "error", err)
 	}
-
 	return level
+}
+
+func (s *wcaSession) CurrentVolume() (float32, error) {
+	if err := s.ensureActive(); err != nil {
+		return 0, err
+	}
+
+	var level float32
+	if err := s.volume.GetMasterVolume(&level); err != nil {
+		return 0, fmt.Errorf("get session volume: %w", err)
+	}
+	return level, nil
 }
 
 func (s *wcaSession) SetVolume(v float32) error {
@@ -124,11 +135,44 @@ func (s *wcaSession) SetVolume(v float32) error {
 		return fmt.Errorf("adjust session volume: %w", err)
 	}
 
-	// mitigate expired sessions by checking the state whenever we change volumes
+	if err := s.ensureActive(); err != nil {
+		return err
+	}
+
+	s.logger.Debugw("Adjusting session volume", "to", fmt.Sprintf("%.2f", v))
+
+	return nil
+}
+
+func (s *wcaSession) CurrentMute() (bool, error) {
+	if err := s.ensureActive(); err != nil {
+		return false, err
+	}
+
+	muted, err := wincom.SimpleAudioVolumeMute(s.volume)
+	if err != nil {
+		return false, fmt.Errorf("get session mute: %w", err)
+	}
+	return muted, nil
+}
+
+func (s *wcaSession) SetMute(muted bool) error {
+	if err := wincom.SetSimpleAudioVolumeMute(s.volume, muted, s.eventCtx); err != nil {
+		return fmt.Errorf("set session mute: %w", err)
+	}
+	if err := s.ensureActive(); err != nil {
+		return err
+	}
+
+	s.logger.Debugw("Adjusting session mute", "muted", muted)
+	return nil
+}
+
+func (s *wcaSession) ensureActive() error {
 	var state uint32
 
 	if err := s.control.GetState(&state); err != nil {
-		s.logger.Warnw("Failed to get session state while setting volume", "error", err)
+		s.logger.Warnw("Failed to get session state", "error", err)
 		return fmt.Errorf("get session state: %w", err)
 	}
 
@@ -136,9 +180,6 @@ func (s *wcaSession) SetVolume(v float32) error {
 		s.logger.Warnw("Audio session expired, triggering session refresh")
 		return errRefreshSessions
 	}
-
-	s.logger.Debugw("Adjusting session volume", "to", fmt.Sprintf("%.2f", v))
-
 	return nil
 }
 
@@ -154,13 +195,23 @@ func (s *wcaSession) String() string {
 }
 
 func (s *masterSession) GetVolume() float32 {
-	var level float32
-
-	if err := s.volume.GetMasterVolumeLevelScalar(&level); err != nil {
+	level, err := s.CurrentVolume()
+	if err != nil {
 		s.logger.Warnw("Failed to get session volume", "error", err)
 	}
-
 	return level
+}
+
+func (s *masterSession) CurrentVolume() (float32, error) {
+	if s.stale {
+		return 0, errRefreshSessions
+	}
+
+	var level float32
+	if err := s.volume.GetMasterVolumeLevelScalar(&level); err != nil {
+		return 0, fmt.Errorf("get master volume: %w", err)
+	}
+	return level, nil
 }
 
 func (s *masterSession) SetVolume(v float32) error {
@@ -179,6 +230,31 @@ func (s *masterSession) SetVolume(v float32) error {
 
 	s.logger.Debugw("Adjusting session volume", "to", fmt.Sprintf("%.2f", v))
 
+	return nil
+}
+
+func (s *masterSession) CurrentMute() (bool, error) {
+	if s.stale {
+		return false, errRefreshSessions
+	}
+
+	muted, err := wincom.EndpointVolumeMute(s.volume)
+	if err != nil {
+		return false, fmt.Errorf("get master mute: %w", err)
+	}
+	return muted, nil
+}
+
+func (s *masterSession) SetMute(muted bool) error {
+	if s.stale {
+		return errRefreshSessions
+	}
+
+	if err := wincom.SetEndpointVolumeMute(s.volume, muted, s.eventCtx); err != nil {
+		return fmt.Errorf("set master mute: %w", err)
+	}
+
+	s.logger.Debugw("Adjusting session mute", "muted", muted)
 	return nil
 }
 

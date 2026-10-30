@@ -21,9 +21,12 @@ module names, and Linux heritage exists even though VFinal targets Windows.
 
 **Rationale.** Relative input can follow host-side state without a physical
 absolute-position conflict. **Consequences.** Firmware must report direction and
-steps, and the host owns the resulting volume value. **Limitations.** Resolution,
+steps, and the host owns the resulting volume value. The Track B1 software
+foundation reads each matching session's actual volume for every movement,
+applies a configurable increment, and clamps the result; see
+[relative volume and mute](RELATIVE_VOLUME_MUTE.md). **Limitations.** Resolution,
 acceleration, and encoder part are unresolved; the four-pot path remains a
-compatibility requirement.
+compatibility requirement, and no encoder serial messages exist yet.
 
 ## D-003 — Momentary mute with software indicators (Planned)
 
@@ -32,9 +35,13 @@ software-controlled indicator.
 
 **Rationale.** Software-authoritative feedback stays correct when state changes
 outside the hardware. **Consequences.** Mute becomes bidirectional state rather
-than a one-way switch. **Limitations.** Indicator technology and external-change
-notification details are unresolved; unsafe legacy `BOOL` bindings cannot be
-used.
+than a one-way switch. For a multi-session application, state is `all-muted`,
+`all-unmuted`, or `mixed`; toggle unmutes only an all-muted target and otherwise
+mutes every session. Track B1 reads actual state and uses audited 32-bit Windows
+`BOOL` bindings; see [relative volume and mute](RELATIVE_VOLUME_MUTE.md).
+**Limitations.** Indicator technology and asynchronous external-change
+notification details are unresolved, and no button/indicator protocol exists
+yet.
 
 ## D-004 — Default-endpoint master (Accepted)
 
