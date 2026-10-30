@@ -1,6 +1,8 @@
 package mixr
 
 import (
+	"bytes"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -8,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zak-steenhoek/mixr/pkg/mixr/icon"
-	"github.com/zak-steenhoek/mixr/pkg/mixr/util"
 )
 
 // Notifier provides generic notification sending
@@ -34,23 +35,14 @@ func NewToastNotifier(logger *zap.SugaredLogger) (*ToastNotifier, error) {
 // Notify sends a toast notification (or falls back to other types of notification for older Windows versions)
 func (tn *ToastNotifier) Notify(title string, message string) {
 
-	// we need to unpack deej.ico somewhere to remain portable. we already have it as bytes so it should be fine
-	appIconPath := filepath.Join(os.TempDir(), "deej.ico")
-
-	if !util.FileExists(appIconPath) {
-		tn.logger.Debugw("Deej icon file missing, creating", "path", appIconPath)
-
-		f, err := os.Create(appIconPath)
-		if err != nil {
-			tn.logger.Errorw("Failed to create toast notification icon", "error", err)
-		}
-
-		if _, err = f.Write(icon.DeejLogo); err != nil {
+	// Toast libraries need a filesystem path, so materialize the same embedded
+	// icon used by the tray and executable. Replace stale copies after upgrades.
+	appIconPath := filepath.Join(os.TempDir(), "mixr.ico")
+	existing, _ := ioutil.ReadFile(appIconPath)
+	if !bytes.Equal(existing, icon.MixrLogo) {
+		tn.logger.Debugw("Creating mixr toast icon", "path", appIconPath)
+		if err := ioutil.WriteFile(appIconPath, icon.MixrLogo, 0600); err != nil {
 			tn.logger.Errorw("Failed to write toast notification icon", "error", err)
-		}
-
-		if err = f.Close(); err != nil {
-			tn.logger.Errorw("Failed to close toast notification icon", "error", err)
 		}
 	}
 

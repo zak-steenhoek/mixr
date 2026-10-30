@@ -13,7 +13,7 @@ func (d *Mixr) initializeTray(onDone func()) {
 	onReady := func() {
 		logger.Debug("Tray instance ready")
 
-		systray.SetTemplateIcon(icon.DeejLogo, icon.DeejLogo)
+		systray.SetTemplateIcon(icon.MixrLogo, icon.MixrLogo)
 		systray.SetTitle("mixr")
 		systray.SetTooltip("mixr")
 
