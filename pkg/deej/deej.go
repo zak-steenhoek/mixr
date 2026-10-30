@@ -125,6 +125,15 @@ func (d *Deej) Verbose() bool {
 	return d.verbose
 }
 
+// ExecuteAudioCommand exposes the transport-independent command boundary on
+// the tray application's existing session map.
+func (d *Deej) ExecuteAudioCommand(command AudioCommand) (AudioCommandResult, error) {
+	if d.sessions == nil {
+		return AudioCommandResult{Target: command.Target}, fmt.Errorf("audio sessions are not initialized")
+	}
+	return d.sessions.ExecuteAudioCommand(command)
+}
+
 func (d *Deej) setupInterruptHandler() {
 	interruptChannel := util.SetupCloseHandler()
 

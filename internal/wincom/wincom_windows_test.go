@@ -20,6 +20,8 @@ var (
 	fakeEndpointID       uintptr
 	fakeSimpleVolume     float32
 	fakeEndpointVolume   float32
+	fakeMuteValue        uintptr
+	fakeMuteContext      uintptr
 	fakeUnregistered     uintptr
 )
 
@@ -136,6 +138,67 @@ func TestVolumeOperationsUseFloat32ABI(t *testing.T) {
 	}
 }
 
+func TestMuteOperationsUseWin32BOOL(t *testing.T) {
+	context := ole.NewGUID("{8b65d71d-3223-45bc-963a-118f613b5f89}")
+
+	simpleVTable := &wca.ISimpleAudioVolumeVtbl{}
+	simpleVTable.GetMute = syscall.NewCallback(fakeGetMute)
+	simpleVTable.SetMute = syscall.NewCallback(fakeSetMute)
+	simple := &wca.ISimpleAudioVolume{
+		IUnknown: ole.IUnknown{RawVTable: (*interface{})(unsafe.Pointer(simpleVTable))},
+	}
+
+	muted, err := SimpleAudioVolumeMute(simple)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !muted {
+		t.Fatal("simple mute = false, want true")
+	}
+	fakeMuteValue = 0
+	fakeMuteContext = 0
+	if err := SetSimpleAudioVolumeMute(simple, true, context); err != nil {
+		t.Fatal(err)
+	}
+	assertNativeMuteCall(t, context)
+
+	endpointVTable := &wca.IAudioEndpointVolumeVtbl{}
+	endpointVTable.GetMute = syscall.NewCallback(fakeGetMute)
+	endpointVTable.SetMute = syscall.NewCallback(fakeSetMute)
+	endpoint := &wca.IAudioEndpointVolume{
+		IUnknown: ole.IUnknown{RawVTable: (*interface{})(unsafe.Pointer(endpointVTable))},
+	}
+
+	muted, err = EndpointVolumeMute(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !muted {
+		t.Fatal("endpoint mute = false, want true")
+	}
+	fakeMuteValue = 1
+	fakeMuteContext = 1
+	if err := SetEndpointVolumeMute(endpoint, false, context); err != nil {
+		t.Fatal(err)
+	}
+	if fakeMuteValue != 0 {
+		t.Fatalf("endpoint BOOL = %#x, want 0", fakeMuteValue)
+	}
+	if fakeMuteContext != uintptr(unsafe.Pointer(context)) {
+		t.Fatalf("endpoint context = %#x, want %#x", fakeMuteContext, uintptr(unsafe.Pointer(context)))
+	}
+}
+
+func assertNativeMuteCall(t *testing.T, context *ole.GUID) {
+	t.Helper()
+	if fakeMuteValue != 1 {
+		t.Fatalf("mute BOOL = %#x, want 1", fakeMuteValue)
+	}
+	if fakeMuteContext != uintptr(unsafe.Pointer(context)) {
+		t.Fatalf("mute context = %#x, want %#x", fakeMuteContext, uintptr(unsafe.Pointer(context)))
+	}
+}
+
 func TestUnregisterEndpointNotificationCallbackUsesVTableSlot(t *testing.T) {
 	vtable := &wca.IMMDeviceEnumeratorVtbl{}
 	vtable.UnregisterEndpointNotificationCallback = syscall.NewCallback(fakeUnregister)
@@ -187,6 +250,17 @@ func fakeSetEndpointVolume(_, level, _ uintptr) uintptr {
 
 func fakeGetEndpointVolume(_, out uintptr) uintptr {
 	*(*float32)(unsafe.Pointer(out)) = 0.73
+	return 0
+}
+
+func fakeGetMute(_, out uintptr) uintptr {
+	*(*int32)(unsafe.Pointer(out)) = -1
+	return 0
+}
+
+func fakeSetMute(_, muted, context uintptr) uintptr {
+	fakeMuteValue = muted
+	fakeMuteContext = context
 	return 0
 }
 

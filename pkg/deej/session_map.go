@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/omriharel/deej/pkg/deej/util"
 	"github.com/thoas/go-funk"
 	"go.uber.org/zap"
 )
@@ -271,56 +270,42 @@ func (m *sessionMap) handleSliderMoveEvent(event SliderMoveEvent) {
 	}
 }
 
+// ExecuteAudioCommand lets future encoder/button event sources use the tray
+// application's existing session snapshot without depending on SerialIO.
+func (m *sessionMap) ExecuteAudioCommand(command AudioCommand) (AudioCommandResult, error) {
+	if m.lastSessionRefresh.Add(maxTimeBetweenSessionRefreshes).Before(time.Now()) {
+		m.refreshSessions(true)
+	}
+
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	resolvedTargets := m.resolveTarget(command.Target)
+	seen := make(map[Session]struct{})
+	matched := make([]audioCommandSession, 0)
+	for _, target := range resolvedTargets {
+		for _, session := range m.m[target] {
+			if _, exists := seen[session]; exists {
+				continue
+			}
+			seen[session] = struct{}{}
+			matched = append(matched, session)
+		}
+	}
+
+	return executeAudioCommand(matched, command)
+}
+
 func (m *sessionMap) targetHasSpecialTransform(target string) bool {
 	return strings.HasPrefix(target, specialTargetTransformPrefix)
 }
 
 func (m *sessionMap) resolveTarget(target string) []string {
-
-	// start by ignoring the case
-	target = strings.ToLower(target)
-
-	// look for any special targets first, by examining the prefix
-	if m.targetHasSpecialTransform(target) {
-		return m.applyTargetTransform(strings.TrimPrefix(target, specialTargetTransformPrefix))
-	}
-
-	return []string{target}
+	return resolveAudioTargetNames(target, m.unmappedSessions)
 }
 
 func (m *sessionMap) applyTargetTransform(specialTargetName string) []string {
-
-	// select the transformation based on its name
-	switch specialTargetName {
-
-	// get current active window
-	case specialTargetCurrentWindow:
-		currentWindowProcessNames, err := util.GetCurrentWindowProcessNames()
-
-		// silently ignore errors here, as this is on deej's "hot path" (and it could just mean the user's running linux)
-		if err != nil {
-			return nil
-		}
-
-		// we could have gotten a non-lowercase names from that, so let's ensure we return ones that are lowercase
-		for targetIdx, target := range currentWindowProcessNames {
-			currentWindowProcessNames[targetIdx] = strings.ToLower(target)
-		}
-
-		// remove dupes
-		return funk.UniqString(currentWindowProcessNames)
-
-	// get currently unmapped sessions
-	case specialTargetAllUnmapped:
-		targetKeys := make([]string, len(m.unmappedSessions))
-		for sessionIdx, session := range m.unmappedSessions {
-			targetKeys[sessionIdx] = session.Key()
-		}
-
-		return targetKeys
-	}
-
-	return nil
+	return resolveSpecialAudioTarget(specialTargetName, m.unmappedSessions)
 }
 
 func (m *sessionMap) add(value Session) {

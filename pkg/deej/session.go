@@ -1,6 +1,7 @@
 package deej
 
 import (
+	"errors"
 	"strings"
 
 	"go.uber.org/zap"
@@ -9,15 +10,18 @@ import (
 // Session represents a single addressable audio session
 type Session interface {
 	GetVolume() float32
+	CurrentVolume() (float32, error)
 	SetVolume(v float32) error
-
-	// TODO: future mute support
-	// GetMute() bool
-	// SetMute(m bool) error
+	CurrentMute() (bool, error)
+	SetMute(muted bool) error
 
 	Key() string
 	Release()
 }
+
+// ErrMuteUnsupported is returned by non-Windows session implementations that
+// do not provide mute control. Track B's supported runtime is Windows.
+var ErrMuteUnsupported = errors.New("mute control is unsupported on this platform")
 
 const (
 

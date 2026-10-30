@@ -110,6 +110,101 @@ func AudioSessionCount(enumerator *wca.IAudioSessionEnumerator) (int, error) {
 	return int(count), nil
 }
 
+// SimpleAudioVolumeMute invokes ISimpleAudioVolume::GetMute with a Win32 BOOL
+// output. BOOL is always 32 bits; using Go bool here lets the native call write
+// past the one-byte value used by the pinned go-wca wrapper.
+func SimpleAudioVolumeMute(volume *wca.ISimpleAudioVolume) (bool, error) {
+	if volume == nil {
+		return false, fmt.Errorf("ISimpleAudioVolume::GetMute: nil volume")
+	}
+
+	var muted int32
+	hr, _, _ := syscall.Syscall(
+		volume.VTable().GetMute,
+		2,
+		uintptr(unsafe.Pointer(volume)),
+		uintptr(unsafe.Pointer(&muted)),
+		0,
+	)
+	runtime.KeepAlive(volume)
+
+	if err := hresult("ISimpleAudioVolume::GetMute", hr); err != nil {
+		return false, err
+	}
+	return muted != 0, nil
+}
+
+// SetSimpleAudioVolumeMute invokes ISimpleAudioVolume::SetMute without using
+// the pinned wrapper's Go-bool signature.
+func SetSimpleAudioVolumeMute(volume *wca.ISimpleAudioVolume, muted bool, eventContext *ole.GUID) error {
+	if volume == nil {
+		return fmt.Errorf("ISimpleAudioVolume::SetMute: nil volume")
+	}
+
+	var nativeMuted uint32
+	if muted {
+		nativeMuted = 1
+	}
+	hr, _, _ := syscall.Syscall(
+		volume.VTable().SetMute,
+		3,
+		uintptr(unsafe.Pointer(volume)),
+		uintptr(nativeMuted),
+		uintptr(unsafe.Pointer(eventContext)),
+	)
+	runtime.KeepAlive(volume)
+	runtime.KeepAlive(eventContext)
+
+	return hresult("ISimpleAudioVolume::SetMute", hr)
+}
+
+// EndpointVolumeMute invokes IAudioEndpointVolume::GetMute with a 32-bit BOOL
+// output instead of the unsafe Go bool used by the pinned dependency.
+func EndpointVolumeMute(volume *wca.IAudioEndpointVolume) (bool, error) {
+	if volume == nil {
+		return false, fmt.Errorf("IAudioEndpointVolume::GetMute: nil volume")
+	}
+
+	var muted int32
+	hr, _, _ := syscall.Syscall(
+		volume.VTable().GetMute,
+		2,
+		uintptr(unsafe.Pointer(volume)),
+		uintptr(unsafe.Pointer(&muted)),
+		0,
+	)
+	runtime.KeepAlive(volume)
+
+	if err := hresult("IAudioEndpointVolume::GetMute", hr); err != nil {
+		return false, err
+	}
+	return muted != 0, nil
+}
+
+// SetEndpointVolumeMute invokes IAudioEndpointVolume::SetMute using a native
+// 32-bit BOOL value and the caller's event context.
+func SetEndpointVolumeMute(volume *wca.IAudioEndpointVolume, muted bool, eventContext *ole.GUID) error {
+	if volume == nil {
+		return fmt.Errorf("IAudioEndpointVolume::SetMute: nil volume")
+	}
+
+	var nativeMuted uint32
+	if muted {
+		nativeMuted = 1
+	}
+	hr, _, _ := syscall.Syscall(
+		volume.VTable().SetMute,
+		3,
+		uintptr(unsafe.Pointer(volume)),
+		uintptr(nativeMuted),
+		uintptr(unsafe.Pointer(eventContext)),
+	)
+	runtime.KeepAlive(volume)
+	runtime.KeepAlive(eventContext)
+
+	return hresult("IAudioEndpointVolume::SetMute", hr)
+}
+
 // UnregisterEndpointNotificationCallback fills the E_NOTIMPL gap in the pinned
 // go-wca wrapper while preserving the wrapper's public object types.
 func UnregisterEndpointNotificationCallback(enumerator *wca.IMMDeviceEnumerator, client *wca.IMMNotificationClient) error {
