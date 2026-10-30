@@ -4,9 +4,10 @@
 
 This branch extends the physically validated single-Spotify-mute prototype with
 a second independent control for the current Windows default playback endpoint.
-It is an unvalidated experiment. The earlier Spotify prototype evidence in
-[EXPERIMENTAL_HARDWARE_MUTE.md](EXPERIMENTAL_HARDWARE_MUTE.md) remains
-historical evidence; none of it proves the new D4/D5 path.
+The dual-control experiment has now passed the user-reported physical validation
+recorded below. The earlier Spotify prototype evidence in
+[EXPERIMENTAL_HARDWARE_MUTE.md](EXPERIMENTAL_HARDWARE_MUTE.md) remains separate
+historical evidence.
 
 The experiment retains four legacy potentiometers, the 9600-baud serial link,
 the Track B1 command model, and documented `IAudioEndpointVolume` mute calls
@@ -160,6 +161,30 @@ no disconnect loop, repeated toggle, stalled pot, crash, stale LED, or unhealthy
 resource growth. Indicator messages should occur only for initial sync or
 actual state changes, not every poll.
 
+## User-observed physical validation
+
+The user reported the following results on 2026-10-30 using the dual-mute
+experiment, Nano R4 hardware, both switch/LED pairs, and the four established
+potentiometers. These are hands-on observations, not automated or instrumented
+measurements.
+
+| Validation item | Result | User-observed behavior |
+|---|---|---|
+| D2/D3 Spotify mute | Pass | D2 controlled Spotify mute and D3 remained synchronized with the observed Spotify mute state. |
+| D4/D5 default-endpoint mute | Pass | D4 controlled the current Windows default playback endpoint and D5 remained synchronized with its observed mute state. |
+| Independent mute domains | Pass | Spotify application mute and default-endpoint mute operated independently. |
+| Non-default routed application isolation | Pass | With Spotify on headphones and Chrome routed to UE Boom, muting the default endpoint did not silence Chrome on UE Boom. |
+| Default playback device change | Pass | Changing the Windows default playback device retargeted D4/D5 to the newly selected endpoint. |
+| USB reconnect safety | Pass | Disconnecting and reconnecting USB resynchronized both indicators without an unintended toggle. |
+| Legacy potentiometer compatibility | Pass | All four existing rotary potentiometers continued to function correctly. |
+| Practical stability soak | Pass | Extended hands-on use of both mute controls and the volume potentiometers produced no observed crash, instability, stale indicator, or unintended toggle; development console output remained clean. |
+
+The stability result is a practical soak pass. Its exact duration was not
+recorded, and it was not an instrumented stress, traffic, memory, or resource
+measurement. The exact Windows build, architecture, Go version, Arduino board
+core/tool version, COM port, and tested binary metadata were also not supplied;
+no values are inferred for those fields.
+
 ## Automated validation
 
 Unit tests cover both control IDs, pre-ready rejection, independent stable-state
@@ -167,7 +192,8 @@ deduplication, reconnect baseline reset, independent indicator state, external
 changes, mixed Spotify sessions, endpoint/session rediscovery, missing endpoint
 failure, duplicate indicator write suppression, and legacy frames.
 
-On 2026-10-30, both `GOARCH=386` and `GOARCH=amd64` passed:
+During milestone finalization on 2026-10-30, both `GOARCH=386` and
+`GOARCH=amd64` passed again:
 
 - `go test -count=1 -buildvcs=false ./...`;
 - `pkg/deej/scripts/windows/build-dev.bat`;
@@ -178,12 +204,16 @@ On 2026-10-30, both `GOARCH=386` and `GOARCH=amd64` passed:
 documented pre-existing unbuffered `signal.Notify` diagnostic in
 `pkg/deej/util/util.go`.
 
-Arduino CLI was not installed in the validation environment. The sketch was
-source-reviewed but was not compiled, uploaded, or physically exercised here.
+Arduino CLI was not installed in the automated validation environment, so the
+sketch was source-reviewed but not compiled there. The physical behavior above
+was observed by the user on the uploaded Nano R4 firmware.
 
 ## Remaining risk
 
-Automated tests simulate audio and serial boundaries. Until physical validation
-is recorded, they do not prove Nano compilation, electrical behavior, audible
-endpoint isolation, default-device switching, reconnect behavior, or stability.
-Do not merge this experiment to main or create a milestone tag from it.
+Automated tests simulate audio and serial boundaries and remain distinct from
+the user-observed physical evidence. Firmware compilation was not independently
+repeated with Arduino CLI in the automated environment. The soak was practical,
+not precisely timed or instrumented, and manual edge cases not explicitly
+reported above—such as operation with every playback endpoint unavailable—remain
+unverified. This milestone does not promote the experimental serial protocol to
+a final production interface. Do not merge this experiment to main yet.
