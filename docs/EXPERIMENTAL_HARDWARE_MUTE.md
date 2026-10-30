@@ -20,8 +20,11 @@ User-reported prerequisites on 2026-10-30 were:
 - The Nano R4 four-pot controller continued working independently.
 - A diagnostic sketch confirmed the D2 latching switch and D3 red LED wiring.
 
-Those prerequisites are not evidence that this branch's end-to-end integration
-has passed physical validation.
+Following implementation, the integrated experimental firmware and host were
+physically exercised on Windows with the Nano R4. User-observed results are
+recorded separately below from the automated checks. This evidence validates
+the prototype behavior that was exercised; it does not promote the protocol or
+hardware design to production functionality.
 
 ## Experimental v1 line protocol
 
@@ -183,6 +186,48 @@ Spotify PIDs/session count, wiring, each observed result, and all untested cases
 3. In verbose logs, confirm LED messages occur only on state changes or initial
    synchronization, not on every poll.
 
+## User-observed physical validation
+
+Physical results were reported by the user on 2026-10-30 using Windows, the
+Nano R4, four existing analog potentiometers, the D2 latching switch, the D3 red
+LED with 1 kΩ resistor, and Spotify. The exact Windows build, host architecture,
+Go version, Arduino board/core version, upload tool version, COM port, default
+endpoint, Spotify PIDs, and exact tested binary commit were not supplied and
+remain unrecorded environment details.
+
+| Validation item | Result | User-observed behavior |
+|---|---|---|
+| Repeated D2 transitions | Pass | The latching switch repeatedly toggled Spotify mute and unmute successfully. |
+| D3 aggregate-state indication | Pass | The red LED followed the aggregate Spotify mute state read back from Windows. |
+| Multiple matching sessions | Pass | Multiple Spotify audio sessions were detected and controlled together. |
+| Mixed-session state | Pass | With one Spotify session muted and another unmuted, the aggregate state was `mixed` and D3 remained off as designed. |
+| All-session muted state | Pass | When every Spotify session was muted, D3 illuminated. |
+| Legacy four-pot regression | Pass | All four analog potentiometers retained their original mappings and continued working. |
+| USB disconnect state safety | Pass | Disconnecting USB did not change the Windows Spotify mute state. |
+| USB reconnect handshake | Pass | Reconnecting restored control and synchronized D3 without an unintended mute change. |
+| Spotify session recreation | Pass | Fully exiting and reopening Spotify restored correct mute and LED behavior, including the single-session case. |
+| Combined short stability run | Pass with duration limitation | Several minutes of combined operation appeared stable. |
+| Formal ten-minute stability run | **Not completed** | The required ten-minute run, including explicit traffic/resource observations, remains open. |
+
+Checklist closeout against the procedure above:
+
+- [x] Four potentiometers continued working with their existing mappings.
+- [x] Each deliberate stable D2 actuation toggled Spotify successfully during
+  repeated physical use.
+- [x] D3 represented observed aggregate Spotify state, including all-muted and
+  mixed multi-session cases.
+- [x] USB disconnect preserved Windows mute state.
+- [x] USB reconnect restored the handshake, control, and LED state without an
+  unintended toggle.
+- [x] Spotify exit/reopen recovered mute control and indication with multiple or
+  one matching session.
+- [x] Several minutes of combined operation showed no reported instability.
+- [ ] Complete and record the formal ten-minute stability/traffic run.
+
+The report did not separately record every diagnostic-log assertion in the
+step-by-step procedure, such as exact message counts, Windows build metadata,
+or resource measurements. Those are not inferred from the behavioral passes.
+
 ## Automated validation
 
 On 2026-10-30, both `GOARCH=386` and `GOARCH=amd64` passed:
@@ -206,8 +251,11 @@ was source-reviewed but not compiled or uploaded here.
 
 ## Limitations and unresolved items
 
-- End-to-end physical validation is pending; this branch must not be merged or
-  tagged as a milestone based on automated checks alone.
+- The user-observed end-to-end prototype behaviors above passed, but the formal
+  ten-minute stability/traffic test remains incomplete.
+- The milestone tag records this experimental proof of concept only. It does
+  not authorize merging the experiment into `main` or treating the protocol as
+  a production interface.
 - This protocol has one fixed control/indicator identifier and no negotiation,
   checksums, acknowledgements, sequencing, or firmware capability discovery.
 - Indicator updates are polling-based rather than Core Audio notification-based.
