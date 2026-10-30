@@ -122,6 +122,26 @@ path.
 This integrated behavior is implemented but not physically validated. Do not
 merge or tag it until the manual regression checklist passes.
 
+### User-observed integrated control checkpoint
+
+On 2026-10-30, the user uploaded the integrated prototype sketch and confirmed
+all items in the initial end-to-end checkpoint:
+
+- the host completed the `hello`/`ready` handshake without a startup mute;
+- D3, D5, and D7 synchronized to default-playback, Spotify, and default-
+  recording mute state respectively;
+- D2 controlled only default-playback mute, D4 only Spotify mute, and D6 only
+  default-recording mute;
+- A4 changed the Windows microphone input level while A0–A3 retained their
+  original mappings; and
+- at A4 minimum, toggling D6/D7 did not produce a visible microphone-level
+  change from the previously measured approximately eight-count ADC offset.
+
+These observations validate the basic integrated mappings and configured
+deadband on the user's hardware. External-state synchronization, USB recovery,
+integrated microphone removal/restoration, and the ten-minute combined soak
+remain open.
+
 ### Automated integration validation
 
 On 2026-10-30, both `GOARCH=386` and `GOARCH=amd64` passed the full Go test
