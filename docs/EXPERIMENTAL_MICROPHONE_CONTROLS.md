@@ -78,3 +78,61 @@ For both `386` and `amd64`, the full Go test suite, development client build,
 routing-spike build, and microphone-control diagnostic build passed. This
 automated result does not replace the open physical endpoint-switching check or
 the later integrated hardware regression.
+
+## Phase 3 integrated prototype
+
+Phase 3 uses the separate
+[`arduino/mixr-microphone-controls-prototype/`](../arduino/mixr-microphone-controls-prototype/README.md)
+sketch so the validated dual-mute firmware remains unchanged. Physical pins are
+D2/D3 default playback, D4/D5 Spotify, and D6/D7 default recording. The logical
+IDs `master-mute` and `spotify-mute` are preserved despite their pin remapping.
+
+The four-field legacy numeric frame remains unchanged. A4 uses the smallest
+additive namespaced extension:
+
+```text
+mixr:v1:event:analog:microphone-level:<0..1023>
+```
+
+Firmware reports A4 after a four-count change and once per second as a recovery
+heartbeat. Host-side `microphone_level_deadband` defaults to 12 ADC counts,
+which suppresses the observed approximately eight-count D7 LED offset. Values
+within the deadband of either endpoint clamp to exactly 0 or 1. The first A4
+event after `ready` intentionally applies absolute microphone level; switch
+positions are only baselined and never become startup mute actions.
+
+Configuration remains under the existing opt-in feature flag:
+
+```yaml
+hardware_mute_prototype:
+  enabled: true
+  target: spotify.exe
+  poll_interval_ms: 500
+  microphone_level_inverted: false
+  microphone_level_deadband: 12
+```
+
+Microphone mute targets the current `mic` session. D7 is driven from actual
+Core Audio readback, including external changes. Missing capture endpoints fail
+safe with D7 off. Polling refreshes stale/missing sessions, and the next A4
+heartbeat reapplies the absolute slider position after capture-endpoint
+rediscovery. Application playback volume is not part of the microphone-level
+path.
+
+This integrated behavior is implemented but not physically validated. Do not
+merge or tag it until the manual regression checklist passes.
+
+### Automated integration validation
+
+On 2026-10-30, both `GOARCH=386` and `GOARCH=amd64` passed the full Go test
+suite, development client build, routing-spike build, Track B1 audio-control
+build, and microphone-control diagnostic build. Tests cover the three logical
+mute controls, independent duplicate rejection, microphone indicator readback,
+missing/default recording endpoint rediscovery, A4 endpoint clamping and
+deadband, post-reconnect absolute synchronization, and unchanged four-field
+legacy frames.
+
+`go vet -unsafeptr=false ./...` on both architectures reported only the
+documented pre-existing unbuffered `signal.Notify` warning in
+`pkg/deej/util/util.go`. Arduino CLI is unavailable, so the integrated sketch
+was source-reviewed but not compiled in this environment.

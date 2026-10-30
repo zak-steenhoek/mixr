@@ -11,6 +11,7 @@ type AudioCommandOperation string
 
 const (
 	AudioCommandRelativeVolume AudioCommandOperation = "relative-volume"
+	AudioCommandSetVolume      AudioCommandOperation = "set-volume"
 	AudioCommandMute           AudioCommandOperation = "mute"
 	AudioCommandUnmute         AudioCommandOperation = "unmute"
 	AudioCommandToggleMute     AudioCommandOperation = "toggle-mute"
@@ -26,6 +27,7 @@ type AudioCommand struct {
 	Operation AudioCommandOperation
 	Steps     int
 	Increment float32
+	Volume    float32
 }
 
 // AudioVolumeState is one session's live volume readback.
@@ -80,6 +82,27 @@ func executeAudioCommand(sessions []audioCommandSession, command AudioCommand) (
 	}
 
 	switch command.Operation {
+	case AudioCommandSetVolume:
+		if math.IsNaN(float64(command.Volume)) || math.IsInf(float64(command.Volume), 0) {
+			return result, fmt.Errorf("absolute volume must be finite")
+		}
+		var failures []string
+		level := clampVolume(command.Volume)
+		for index, session := range sessions {
+			if err := session.SetVolume(level); err != nil {
+				failures = append(failures, sessionFailure(index, session, "set absolute volume", err))
+				continue
+			}
+			actual, err := session.CurrentVolume()
+			if err != nil {
+				failures = append(failures, sessionFailure(index, session, "read volume back", err))
+				continue
+			}
+			result.Volumes = append(result.Volumes, AudioVolumeState{SessionKey: session.Key(), Volume: actual})
+		}
+		result.MixedVolume = volumesAreMixed(result.Volumes)
+		return result, combinedCommandError(failures)
+
 	case AudioCommandRelativeVolume:
 		if command.Increment <= 0 || command.Increment > 1 || math.IsNaN(float64(command.Increment)) || math.IsInf(float64(command.Increment), 0) {
 			return result, fmt.Errorf("relative volume increment must be greater than 0 and at most 1")

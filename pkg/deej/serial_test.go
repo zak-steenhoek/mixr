@@ -36,12 +36,14 @@ func TestSerialLineParsingKeepsLegacyFramesSeparate(t *testing.T) {
 	sio.handleLine(sio.logger, "0|256|512|1023\r\n")
 	sio.handleLine(sio.logger, "mixr:v1:event:switch:spotify-mute:1\r\n")
 	sio.handleLine(sio.logger, "mixr:v1:event:switch:master-mute:0\r\n")
+	sio.handleLine(sio.logger, "mixr:v1:event:switch:microphone-mute:1\r\n")
+	sio.handleLine(sio.logger, "mixr:v1:event:analog:microphone-level:512\r\n")
 
 	if len(sliderEvents) != 4 {
 		t.Fatalf("legacy slider event count = %d, want 4", len(sliderEvents))
 	}
-	if len(prototypeEvents) != 3 {
-		t.Fatalf("prototype event count = %d, want ready + two switches", len(prototypeEvents))
+	if len(prototypeEvents) != 5 {
+		t.Fatalf("prototype event count = %d, want ready + three switches + analog", len(prototypeEvents))
 	}
 	ready := <-prototypeEvents
 	switchEvent := <-prototypeEvents
@@ -54,6 +56,14 @@ func TestSerialLineParsingKeepsLegacyFramesSeparate(t *testing.T) {
 	masterEvent := <-prototypeEvents
 	if masterEvent.Kind != PrototypeSerialSwitchEvent || masterEvent.ControlID != prototypeMasterMuteControl || masterEvent.SwitchClosed {
 		t.Fatalf("third prototype event = %#v, want open master switch", masterEvent)
+	}
+	microphoneEvent := <-prototypeEvents
+	if microphoneEvent.ControlID != prototypeMicrophoneMuteControl || !microphoneEvent.SwitchClosed {
+		t.Fatalf("fourth prototype event = %#v, want closed microphone switch", microphoneEvent)
+	}
+	analogEvent := <-prototypeEvents
+	if analogEvent.Kind != PrototypeSerialAnalogEvent || analogEvent.AnalogValue != 512 {
+		t.Fatalf("fifth prototype event = %#v, want A4 value 512", analogEvent)
 	}
 }
 
@@ -87,12 +97,20 @@ func TestPrototypeIndicatorSuppressesDuplicateWrites(t *testing.T) {
 	if err := sio.setPrototypeIndicator(prototypeMasterMuteControl, true); err != nil {
 		t.Fatal(err)
 	}
+	if err := sio.setPrototypeIndicator(prototypeMicrophoneMuteControl, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := sio.setPrototypeIndicator(prototypeMicrophoneMuteControl, true); err != nil {
+		t.Fatal(err)
+	}
 
 	want := []string{
 		"mixr:v1:state:indicator:spotify-mute:0\n",
 		"mixr:v1:state:indicator:spotify-mute:1\n",
 		"mixr:v1:state:indicator:master-mute:0\n",
 		"mixr:v1:state:indicator:master-mute:1\n",
+		"mixr:v1:state:indicator:microphone-mute:0\n",
+		"mixr:v1:state:indicator:microphone-mute:1\n",
 	}
 	if len(conn.writes) != len(want) {
 		t.Fatalf("write count = %d, want %d (%q)", len(conn.writes), len(want), conn.writes)

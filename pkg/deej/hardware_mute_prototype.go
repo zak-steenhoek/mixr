@@ -20,18 +20,22 @@ type prototypeMuteControl struct {
 	lastSessionRefresh time.Time
 }
 
-// hardwareMutePrototype is intentionally narrow and disposable. It proves two
-// independent switch -> Windows mute -> observed indicator loops without
-// defining VFinal's channel or protocol architecture.
+// hardwareMutePrototype is intentionally narrow and disposable. It proves
+// three switch -> Windows mute -> observed indicator loops plus one absolute
+// microphone-level path without defining VFinal's channel architecture.
 type hardwareMutePrototype struct {
-	logger    *zap.SugaredLogger
-	commander AudioCommander
-	indicator prototypeIndicatorWriter
-	events    <-chan PrototypeSerialEvent
-	refresh   func()
-	controls  map[string]*prototypeMuteControl
-	poll      time.Duration
-	verbose   bool
+	logger                  *zap.SugaredLogger
+	commander               AudioCommander
+	indicator               prototypeIndicatorWriter
+	events                  <-chan PrototypeSerialEvent
+	refresh                 func()
+	controls                map[string]*prototypeMuteControl
+	poll                    time.Duration
+	verbose                 bool
+	microphoneLevelInverted bool
+	microphoneLevelDeadband int
+	hasLastMicrophoneLevel  bool
+	lastMicrophoneADC       int
 
 	mu        sync.Mutex
 	ready     bool
@@ -51,21 +55,25 @@ func newHardwareMutePrototype(deej *Deej, logger *zap.SugaredLogger) *hardwareMu
 			deej.sessions.refreshSessions(true)
 		},
 		controls: map[string]*prototypeMuteControl{
-			prototypeSpotifyMuteControl: {target: deej.config.HardwareMutePrototype.Target},
-			prototypeMasterMuteControl:  {target: masterSessionName},
+			prototypeSpotifyMuteControl:    {target: deej.config.HardwareMutePrototype.Target},
+			prototypeMasterMuteControl:     {target: masterSessionName},
+			prototypeMicrophoneMuteControl: {target: inputSessionName},
 		},
-		poll:    deej.config.HardwareMutePrototype.PollInterval,
-		verbose: deej.Verbose(),
-		stop:    make(chan struct{}),
-		done:    make(chan struct{}),
+		poll:                    deej.config.HardwareMutePrototype.PollInterval,
+		verbose:                 deej.Verbose(),
+		microphoneLevelInverted: deej.config.HardwareMutePrototype.MicrophoneLevelInverted,
+		microphoneLevelDeadband: deej.config.HardwareMutePrototype.MicrophoneLevelDeadband,
+		stop:                    make(chan struct{}),
+		done:                    make(chan struct{}),
 	}
 }
 
 func (p *hardwareMutePrototype) Start() {
 	p.startOnce.Do(func() {
-		p.logger.Infow("Starting experimental dual hardware mute integration",
+		p.logger.Infow("Starting experimental microphone controls integration",
 			"spotifyTarget", p.controls[prototypeSpotifyMuteControl].target,
 			"masterTarget", p.controls[prototypeMasterMuteControl].target,
+			"microphoneTarget", p.controls[prototypeMicrophoneMuteControl].target,
 			"pollInterval", p.poll)
 		go p.run()
 	})
@@ -103,10 +111,11 @@ func (p *hardwareMutePrototype) handleEvent(event PrototypeSerialEvent) {
 	switch event.Kind {
 	case PrototypeSerialReady:
 		p.ready = true
+		p.hasLastMicrophoneLevel = false
 		for _, control := range p.controls {
 			control.hasLastSwitch = false
 		}
-		p.logger.Info("Prototype firmware ready; synchronizing both indicators from Windows")
+		p.logger.Info("Prototype firmware ready; synchronizing three indicators from Windows")
 		p.syncIndicatorsLocked(true)
 
 	case PrototypeSerialSwitchEvent:
@@ -126,7 +135,49 @@ func (p *hardwareMutePrototype) handleEvent(event PrototypeSerialEvent) {
 		p.logger.Infow("Accepted debounced mute switch transition",
 			"control", event.ControlID, "target", control.target, "closed", event.SwitchClosed)
 		p.toggleLocked(event.ControlID, control)
+
+	case PrototypeSerialAnalogEvent:
+		if !p.ready || event.ControlID != prototypeMicrophoneLevelControl {
+			return
+		}
+		p.applyMicrophoneLevelLocked(event.AnalogValue)
 	}
+}
+
+func (p *hardwareMutePrototype) applyMicrophoneLevelLocked(adc int) {
+	if p.hasLastMicrophoneLevel && absInt(adc-p.lastMicrophoneADC) < p.microphoneLevelDeadband {
+		return
+	}
+
+	level := float32(adc) / 1023
+	if adc <= p.microphoneLevelDeadband {
+		level = 0
+	} else if adc >= 1023-p.microphoneLevelDeadband {
+		level = 1
+	}
+	if p.microphoneLevelInverted {
+		level = 1 - level
+	}
+
+	control := p.controls[prototypeMicrophoneMuteControl]
+	command := AudioCommand{Target: control.target, Operation: AudioCommandSetVolume, Volume: level}
+	result, err := p.executeCommandWithRefreshLocked(control, command, false)
+	if err != nil {
+		p.logger.Warnw("Microphone level update failed", "adc", adc, "level", level, "error", err)
+		return
+	}
+	p.hasLastMicrophoneLevel = true
+	p.lastMicrophoneADC = adc
+	if p.verbose {
+		p.logger.Debugw("Microphone level synchronized", "adc", adc, "requested", level, "readback", result.Volumes)
+	}
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func (p *hardwareMutePrototype) toggleLocked(controlID string, control *prototypeMuteControl) {
@@ -154,7 +205,7 @@ func (p *hardwareMutePrototype) syncIndicatorsLocked(forceRefresh bool) {
 	if !p.ready {
 		return
 	}
-	for _, controlID := range []string{prototypeSpotifyMuteControl, prototypeMasterMuteControl} {
+	for _, controlID := range []string{prototypeMasterMuteControl, prototypeSpotifyMuteControl, prototypeMicrophoneMuteControl} {
 		p.syncIndicatorLocked(controlID, p.controls[controlID], forceRefresh)
 	}
 }
@@ -183,6 +234,10 @@ func (p *hardwareMutePrototype) syncIndicatorLocked(controlID string, control *p
 
 func (p *hardwareMutePrototype) executeWithRefreshLocked(control *prototypeMuteControl, operation AudioCommandOperation, forceRefresh bool) (AudioCommandResult, error) {
 	command := AudioCommand{Target: control.target, Operation: operation}
+	return p.executeCommandWithRefreshLocked(control, command, forceRefresh)
+}
+
+func (p *hardwareMutePrototype) executeCommandWithRefreshLocked(control *prototypeMuteControl, command AudioCommand, forceRefresh bool) (AudioCommandResult, error) {
 	result, err := p.commander.ExecuteAudioCommand(command)
 	if err == nil || p.refresh == nil {
 		return result, err
@@ -192,8 +247,12 @@ func (p *hardwareMutePrototype) executeWithRefreshLocked(control *prototypeMuteC
 	if !forceRefresh && control.lastSessionRefresh.Add(prototypeSessionRefreshCooldown).After(now) {
 		return result, err
 	}
-	p.logger.Debugw("Refreshing sessions after mute command failure", "target", control.target, "operation", operation, "error", err)
+	p.logger.Debugw("Refreshing sessions after audio command failure", "target", control.target, "operation", command.Operation, "error", err)
 	control.lastSessionRefresh = now
+	// Every refresh replaces the complete session snapshot and may therefore
+	// select a different capture endpoint even when another target triggered
+	// it. The next firmware heartbeat must reapply the absolute A4 position.
+	p.hasLastMicrophoneLevel = false
 	p.refresh()
 	return p.commander.ExecuteAudioCommand(command)
 }

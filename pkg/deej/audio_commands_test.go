@@ -30,6 +30,18 @@ func TestRelativeVolumeReadsEachSessionAndClamps(t *testing.T) {
 	}
 }
 
+func TestAbsoluteVolumeClampsAndReadsBack(t *testing.T) {
+	session := &fakeCommandSession{key: "mic", volume: 0.5}
+	for _, test := range []struct{ requested, want float32 }{{-0.2, 0}, {0.42, 0.42}, {1.2, 1}} {
+		result, err := executeAudioCommand([]audioCommandSession{session}, AudioCommand{Target: "mic", Operation: AudioCommandSetVolume, Volume: test.requested})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertVolume(t, session.volume, test.want)
+		assertVolume(t, result.Volumes[0].Volume, test.want)
+	}
+}
+
 func TestRelativeVolumeLowerBoundaryAndFreshState(t *testing.T) {
 	session := &fakeCommandSession{key: "master", volume: 0.05}
 	command := AudioCommand{Target: "master", Operation: AudioCommandRelativeVolume, Steps: -2, Increment: 0.10}

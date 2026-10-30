@@ -28,9 +28,11 @@ type CanonicalConfig struct {
 	NoiseReductionLevel string
 
 	HardwareMutePrototype struct {
-		Enabled      bool
-		Target       string
-		PollInterval time.Duration
+		Enabled                 bool
+		Target                  string
+		PollInterval            time.Duration
+		MicrophoneLevelInverted bool
+		MicrophoneLevelDeadband int
 	}
 
 	logger             *zap.SugaredLogger
@@ -54,20 +56,23 @@ const (
 
 	configType = "yaml"
 
-	configKeySliderMapping       = "slider_mapping"
-	configKeyInvertSliders       = "invert_sliders"
-	configKeyCOMPort             = "com_port"
-	configKeyBaudRate            = "baud_rate"
-	configKeyNoiseReductionLevel = "noise_reduction"
-	configKeyHardwareMuteEnabled = "hardware_mute_prototype.enabled"
-	configKeyHardwareMuteTarget  = "hardware_mute_prototype.target"
-	configKeyHardwareMutePollMS  = "hardware_mute_prototype.poll_interval_ms"
+	configKeySliderMapping           = "slider_mapping"
+	configKeyInvertSliders           = "invert_sliders"
+	configKeyCOMPort                 = "com_port"
+	configKeyBaudRate                = "baud_rate"
+	configKeyNoiseReductionLevel     = "noise_reduction"
+	configKeyHardwareMuteEnabled     = "hardware_mute_prototype.enabled"
+	configKeyHardwareMuteTarget      = "hardware_mute_prototype.target"
+	configKeyHardwareMutePollMS      = "hardware_mute_prototype.poll_interval_ms"
+	configKeyMicrophoneLevelInverted = "hardware_mute_prototype.microphone_level_inverted"
+	configKeyMicrophoneLevelDeadband = "hardware_mute_prototype.microphone_level_deadband"
 
-	defaultCOMPort              = "COM4"
-	defaultBaudRate             = 9600
-	defaultHardwareMuteTarget   = "spotify.exe"
-	defaultHardwareMutePollMS   = 500
-	minimumHardwareMutePollTime = 100 * time.Millisecond
+	defaultCOMPort                 = "COM4"
+	defaultBaudRate                = 9600
+	defaultHardwareMuteTarget      = "spotify.exe"
+	defaultHardwareMutePollMS      = 500
+	defaultMicrophoneLevelDeadband = 12
+	minimumHardwareMutePollTime    = 100 * time.Millisecond
 )
 
 // has to be defined as a non-constant because we're using path.Join
@@ -104,6 +109,8 @@ func NewConfig(logger *zap.SugaredLogger, notifier Notifier) (*CanonicalConfig, 
 	userConfig.SetDefault(configKeyHardwareMuteEnabled, false)
 	userConfig.SetDefault(configKeyHardwareMuteTarget, defaultHardwareMuteTarget)
 	userConfig.SetDefault(configKeyHardwareMutePollMS, defaultHardwareMutePollMS)
+	userConfig.SetDefault(configKeyMicrophoneLevelInverted, false)
+	userConfig.SetDefault(configKeyMicrophoneLevelDeadband, defaultMicrophoneLevelDeadband)
 
 	internalConfig := viper.New()
 	internalConfig.SetConfigName(internalConfigName)
@@ -269,6 +276,16 @@ func (cc *CanonicalConfig) populateFromVipers() error {
 		pollInterval = defaultHardwareMutePollMS * time.Millisecond
 	}
 	cc.HardwareMutePrototype.PollInterval = pollInterval
+	cc.HardwareMutePrototype.MicrophoneLevelInverted = cc.userConfig.GetBool(configKeyMicrophoneLevelInverted)
+	deadband := cc.userConfig.GetInt(configKeyMicrophoneLevelDeadband)
+	if deadband < 0 || deadband > 128 {
+		cc.logger.Warnw("Invalid microphone level deadband, using default value",
+			"key", configKeyMicrophoneLevelDeadband,
+			"invalidValue", deadband,
+			"defaultValue", defaultMicrophoneLevelDeadband)
+		deadband = defaultMicrophoneLevelDeadband
+	}
+	cc.HardwareMutePrototype.MicrophoneLevelDeadband = deadband
 
 	cc.logger.Debug("Populated config fields from vipers")
 

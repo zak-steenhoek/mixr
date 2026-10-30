@@ -207,8 +207,8 @@ func (s *masterSession) CurrentVolume() (float32, error) {
 		return 0, errRefreshSessions
 	}
 
-	var level float32
-	if err := s.volume.GetMasterVolumeLevelScalar(&level); err != nil {
+	level, err := wincom.EndpointVolumeLevelScalar(s.volume)
+	if err != nil {
 		return 0, fmt.Errorf("get master volume: %w", err)
 	}
 	return level, nil
@@ -220,7 +220,7 @@ func (s *masterSession) SetVolume(v float32) error {
 		return errRefreshSessions
 	}
 
-	if err := s.volume.SetMasterVolumeLevelScalar(v, s.eventCtx); err != nil {
+	if err := wincom.SetEndpointVolumeLevelScalar(s.volume, v, s.eventCtx); err != nil {
 		s.logger.Warnw("Failed to set session volume",
 			"error", err,
 			"volume", v)
