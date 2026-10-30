@@ -142,6 +142,22 @@ deadband on the user's hardware. External-state synchronization, USB recovery,
 integrated microphone removal/restoration, and the ten-minute combined soak
 remain open.
 
+During the next checkpoint, default-playback and microphone indicator sync plus
+USB recovery passed. Spotify D5 intermittently failed to follow an external
+Windows Mixer change until Spotify mute changed in the opposite direction;
+after that reversal, external changes followed again. This pattern is
+consistent with one host-to-firmware indicator line being missed after the host
+had cached it as sent: identical state polls were then suppressed, while an
+opposite state produced a new line and repaired the mismatch.
+
+The host now retains immediate duplicate suppression but authoritatively
+resends each unchanged indicator state every two seconds. This adds at most 1.5
+short lines per second across all three indicators and bounds recovery from one
+missed LED command without requiring a mute reversal. Automated tests cover
+both immediate suppression and the delayed resend. The D5 behavior requires
+physical revalidation with repeated external Spotify mute changes before this
+checkpoint can pass.
+
 ### Automated integration validation
 
 On 2026-10-30, both `GOARCH=386` and `GOARCH=amd64` passed the full Go test

@@ -42,6 +42,7 @@ type SerialIO struct {
 	prototypeReady             bool
 	prototypeEnabled           bool
 	lastIndicatorStates        map[string]bool
+	lastIndicatorSentAt        map[string]time.Time
 	prototypeConsumers         []chan PrototypeSerialEvent
 	sliderMoveConsumers        []chan SliderMoveEvent
 	lastKnownNumSliders        int
@@ -56,6 +57,8 @@ type SliderMoveEvent struct {
 
 var expectedLinePattern = regexp.MustCompile(`^\d{1,4}(\|\d{1,4})*\r\n$`)
 
+const prototypeIndicatorResyncInterval = 2 * time.Second
+
 // NewSerialIO creates a SerialIO instance that uses the provided deej
 // instance's connection info to establish communications with the Arduino.
 func NewSerialIO(deej *Deej, logger *zap.SugaredLogger) (*SerialIO, error) {
@@ -65,6 +68,7 @@ func NewSerialIO(deej *Deej, logger *zap.SugaredLogger) (*SerialIO, error) {
 		deej:                deej,
 		logger:              logger,
 		lastIndicatorStates: make(map[string]bool),
+		lastIndicatorSentAt: make(map[string]time.Time),
 		prototypeConsumers:  []chan PrototypeSerialEvent{},
 		sliderMoveConsumers: []chan SliderMoveEvent{},
 		openPort:            serial.Open,
@@ -148,6 +152,7 @@ func (sio *SerialIO) openConnection(lifecycle uint64) error {
 	sio.connected = true
 	sio.prototypeReady = false
 	sio.lastIndicatorStates = make(map[string]bool)
+	sio.lastIndicatorSentAt = make(map[string]time.Time)
 	sio.stateMu.Unlock()
 
 	namedLogger := sio.logger.Named(strings.ToLower(options.PortName))
@@ -174,6 +179,7 @@ func (sio *SerialIO) Stop() {
 	sio.connected = false
 	sio.prototypeReady = false
 	sio.lastIndicatorStates = make(map[string]bool)
+	sio.lastIndicatorSentAt = make(map[string]time.Time)
 	sio.stateMu.Unlock()
 
 	if conn == nil {
@@ -262,6 +268,7 @@ func (sio *SerialIO) handleDisconnect(logger *zap.SugaredLogger, conn io.ReadWri
 	sio.connected = false
 	sio.prototypeReady = false
 	sio.lastIndicatorStates = make(map[string]bool)
+	sio.lastIndicatorSentAt = make(map[string]time.Time)
 	shouldReconnect := !sio.stopping
 	if shouldReconnect && !sio.reconnectScheduled {
 		sio.reconnectScheduled = true
@@ -351,8 +358,9 @@ func (sio *SerialIO) writePrototypeLine(lifecycle, generation uint64, message st
 	return nil
 }
 
-// setPrototypeIndicator writes only observed state changes. The cache resets on
-// every connection, so ready always causes one authoritative synchronization.
+// setPrototypeIndicator writes observed state changes immediately and repeats
+// unchanged state at a low rate so one lost firmware command self-heals. The
+// cache resets on every connection, so ready always synchronizes immediately.
 func (sio *SerialIO) setPrototypeIndicator(controlID string, on bool) error {
 	sio.indicatorMu.Lock()
 	defer sio.indicatorMu.Unlock()
@@ -363,7 +371,9 @@ func (sio *SerialIO) setPrototypeIndicator(controlID string, on bool) error {
 		return nil
 	}
 	last, sent := sio.lastIndicatorStates[controlID]
-	if sent && last == on {
+	lastSentAt := sio.lastIndicatorSentAt[controlID]
+	now := time.Now()
+	if sent && last == on && now.Sub(lastSentAt) < prototypeIndicatorResyncInterval {
 		sio.stateMu.RUnlock()
 		return nil
 	}
@@ -376,7 +386,11 @@ func (sio *SerialIO) setPrototypeIndicator(controlID string, on bool) error {
 	}
 	sio.stateMu.Lock()
 	if sio.lifecycle == lifecycle && sio.connectionGeneration == generation && sio.prototypeReady {
+		if sio.lastIndicatorSentAt == nil {
+			sio.lastIndicatorSentAt = make(map[string]time.Time)
+		}
 		sio.lastIndicatorStates[controlID] = on
+		sio.lastIndicatorSentAt[controlID] = now
 	}
 	sio.stateMu.Unlock()
 	return nil
@@ -412,6 +426,7 @@ func (sio *SerialIO) handlePrototypeEvent(logger *zap.SugaredLogger, event Proto
 		}
 		sio.prototypeReady = true
 		sio.lastIndicatorStates = make(map[string]bool)
+		sio.lastIndicatorSentAt = make(map[string]time.Time)
 		ready = true
 	}
 	sio.stateMu.Unlock()

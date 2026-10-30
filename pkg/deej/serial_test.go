@@ -122,6 +122,40 @@ func TestPrototypeIndicatorSuppressesDuplicateWrites(t *testing.T) {
 	}
 }
 
+func TestPrototypeIndicatorPeriodicallyResendsUnchangedState(t *testing.T) {
+	conn := &recordingSerialConn{}
+	sio := &SerialIO{
+		logger:               zap.NewNop().Sugar(),
+		connected:            true,
+		prototypeReady:       true,
+		lifecycle:            1,
+		connectionGeneration: 1,
+		conn:                 conn,
+		lastIndicatorStates:  make(map[string]bool),
+		lastIndicatorSentAt:  make(map[string]time.Time),
+	}
+
+	if err := sio.setPrototypeIndicator(prototypeSpotifyMuteControl, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := sio.setPrototypeIndicator(prototypeSpotifyMuteControl, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(conn.writes) != 1 {
+		t.Fatalf("immediate duplicate write count = %d, want 1", len(conn.writes))
+	}
+
+	sio.stateMu.Lock()
+	sio.lastIndicatorSentAt[prototypeSpotifyMuteControl] = time.Now().Add(-prototypeIndicatorResyncInterval)
+	sio.stateMu.Unlock()
+	if err := sio.setPrototypeIndicator(prototypeSpotifyMuteControl, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(conn.writes) != 2 || conn.writes[1] != "mixr:v1:state:indicator:spotify-mute:1\n" {
+		t.Fatalf("periodic authoritative writes = %q, want repeated Spotify on", conn.writes)
+	}
+}
+
 func TestSerialReconnectsAfterEstablishedConnectionLoss(t *testing.T) {
 	config := &CanonicalConfig{}
 	config.ConnectionInfo.COMPort = "TEST"
@@ -153,6 +187,7 @@ func TestSerialReconnectsAfterEstablishedConnectionLoss(t *testing.T) {
 	sio.stateMu.Lock()
 	sio.prototypeReady = true
 	sio.lastIndicatorStates[prototypeSpotifyMuteControl] = true
+	sio.lastIndicatorSentAt = map[string]time.Time{prototypeSpotifyMuteControl: time.Now()}
 	sio.stateMu.Unlock()
 	first.fail(io.ErrUnexpectedEOF)
 	deadline := time.Now().Add(2 * time.Second)
@@ -164,10 +199,11 @@ func TestSerialReconnectsAfterEstablishedConnectionLoss(t *testing.T) {
 		sio.stateMu.RLock()
 		ready := sio.prototypeReady
 		indicatorCount := len(sio.lastIndicatorStates)
+		indicatorTimestampCount := len(sio.lastIndicatorSentAt)
 		sio.stateMu.RUnlock()
 		if connected && generation == 2 {
-			if ready || indicatorCount != 0 {
-				t.Fatalf("reconnect retained prototype state: ready=%t indicators=%d", ready, indicatorCount)
+			if ready || indicatorCount != 0 || indicatorTimestampCount != 0 {
+				t.Fatalf("reconnect retained prototype state: ready=%t indicators=%d timestamps=%d", ready, indicatorCount, indicatorTimestampCount)
 			}
 			break
 		}

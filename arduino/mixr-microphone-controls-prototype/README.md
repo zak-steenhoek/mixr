@@ -15,6 +15,10 @@ microphone level.
 All switches use `INPUT_PULLUP`. Integrated LEDs are host-authoritative and do
 not follow switch position directly.
 
+The host sends indicator changes immediately and repeats unchanged authoritative
+state every two seconds. This bounded resend allows D3/D5/D7 to self-heal if a
+single host-to-firmware LED line is missed.
+
 The sketch continues emitting exactly four pipe-delimited legacy values. A4 is
 additive and namespaced:
 
