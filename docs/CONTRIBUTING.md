@@ -1,36 +1,31 @@
-I'm writing this document to help set the expectations of developers looking to add features they wrote to deej's main fork.
+# Contributing to mixr
 
-I hope that even though not everyone would be happy about my approach to this subject, we'll be able to have a civil and respectful discussion around it. If you're interested in doing so, I invite you to reach out to me via our community [Discord server](https://discord.gg/nf88NJu).
+mixr is a Windows-focused evolution of deej. Keep changes narrow, testable, and
+compatible with the validated four-pot and `mixr:v1:` hardware paths. Product
+scope is maintained in [REQUIREMENTS.md](REQUIREMENTS.md), architecture choices
+in [DECISIONS.md](DECISIONS.md), and repository-specific working rules in the
+root [AGENTS.md](../AGENTS.md).
 
-Thanks for reading!
+## Development workflow
 
-## Some background, and my vision for deej
+1. Branch focused implementation separately from experiments.
+2. Preserve `config.yaml`, `deej.current`, `deej.unmapped`, the 9600-baud
+   pipe-delimited potentiometer stream, and existing `mixr:v1:` messages unless
+   an approved migration explicitly changes them.
+3. Use `internal/wincom` for audited Core Audio calls; do not restore unsafe
+   pinned `go-wca` methods.
+4. Run the 386/amd64 commands in `AGENTS.md` from the repository root.
+5. Treat physical Windows/Nano validation as distinct from automated tests and
+   record the hardware, Windows/build version, procedure, results, and gaps.
+6. Keep commits focused and avoid unrelated refactors.
 
-Similarly to other software developers who maintain open-source projects outside of their workplace, I work on deej - for free - in my free time, motivation and mood permitting.
+Application code is under `pkg/mixr`, supported build scripts are under
+`pkg/mixr/scripts`, diagnostic commands are under `cmd`, and compatible
+firmware is under `arduino`.
 
-A lot of that time is spent interacting outside of GitHub, by running our community Discord server which is an active space with over a thousand members. This includes supporting users with their initial setup of deej, answering questions about deej and commenting on user-created builds and designs.
+## Upstream attribution
 
-Since the project's initial debut in February 2020, I had the pleasure of talking to hundreds of users - beginners and seasoned developers alike - which has guided my decisions on subjects like licensing and documentation, as well as helped me form the following vision for deej's future:
-
-### Project scope
-
-I have a fairly set vision for deej and what it should be (including at which point in time I'd like to add certain things). I prefer to work on these things myself - as mentioned above, when I have the time and motivation to do so.
-
-### Project audience
-
-Many of deej's users aren't necessarily tech-savvy, and for some of them this is their first time making a combined electronics hardware + software project. This fact influences many decisions vis-a-vis keeping things as simple as possible. I care a lot about beginners being able to get started easily, even at the cost of certain more advanced features not being included in vanilla deej.
-
-## Pull requests and alternate forks
-
-The nature of how I currently choose to maintain deej means that **I'm not likely to accept and incorporate PRs** into deej's main fork ([omriharel/deej](https://github.com/omriharel/deej)).
-
-Despite the above, **deej is still a fully open-source project**. I don't want my occasional lack of energy to stand in the way of anyone looking to make something awesome - you have my blessing to fork the project, maintain your copy of it separately, and tell the world (_including_ our community Discord server) about it!
-
-### Getting started with development
-
-- Have a Go 1.14+ environment
-- Use the build scripts under `pkg/deej/scripts` for your built binaries if you want them to have the notion of versioning
-
-## Issues
-
-I welcome all bug reports and feature requests, and try to respond to these within a reasonable amount of time.
+mixr remains based on Omri Harel's deej project and retains its MIT license.
+The inherited upstream contributing guide is preserved as
+[deej-contributing.md](upstream/deej-contributing.md) for historical context;
+its maintainer and contribution policies describe upstream deej, not mixr.

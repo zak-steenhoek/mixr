@@ -1,4 +1,8 @@
-# deej FAQ
+# Upstream deej FAQ
+
+> This inherited FAQ documents upstream deej. It is preserved as compatible
+> hardware background and historical attribution; executable names, download
+> links, and internal paths may differ in mixr.
 
 This document tries to cover all of the most commonly asked questions in our [community Discord server](https://discord.gg/nf88NJu), as well as provide basic troubleshooting for frequently-encountered problems by new deej users.
 

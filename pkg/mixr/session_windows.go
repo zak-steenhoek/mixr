@@ -1,0 +1,273 @@
+package mixr
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	ole "github.com/go-ole/go-ole"
+	ps "github.com/mitchellh/go-ps"
+	wca "github.com/moutend/go-wca"
+	"github.com/zak-steenhoek/mixr/internal/wincom"
+	"go.uber.org/zap"
+)
+
+var errNoSuchProcess = errors.New("No such process")
+var errRefreshSessions = errors.New("Trigger session refresh")
+
+type wcaSession struct {
+	baseSession
+
+	pid         uint32
+	processName string
+
+	control *wca.IAudioSessionControl2
+	volume  *wca.ISimpleAudioVolume
+
+	eventCtx *ole.GUID
+}
+
+type masterSession struct {
+	baseSession
+
+	volume *wca.IAudioEndpointVolume
+
+	eventCtx *ole.GUID
+
+	stale bool // when set to true, we should refresh sessions on the next call to SetVolume
+}
+
+func newWCASession(
+	logger *zap.SugaredLogger,
+	control *wca.IAudioSessionControl2,
+	volume *wca.ISimpleAudioVolume,
+	pid uint32,
+	eventCtx *ole.GUID,
+) (*wcaSession, error) {
+
+	s := &wcaSession{
+		control:  control,
+		volume:   volume,
+		pid:      pid,
+		eventCtx: eventCtx,
+	}
+
+	// special treatment for system sounds session
+	if pid == 0 {
+		s.system = true
+		s.name = systemSessionName
+		s.humanReadableDesc = "system sounds"
+	} else {
+
+		// find our session's process name
+		process, err := ps.FindProcess(int(pid))
+		if err != nil {
+			logger.Warnw("Failed to find process name by ID", "pid", pid, "error", err)
+
+			return nil, fmt.Errorf("find process name by pid: %w", err)
+		}
+
+		// this PID may be invalid - this means the process has already been
+		// closed and we shouldn't create a session for it.
+		if process == nil {
+			logger.Debugw("Process already exited, not creating audio session", "pid", pid)
+			return nil, errNoSuchProcess
+		}
+
+		s.processName = process.Executable()
+		s.name = s.processName
+		s.humanReadableDesc = fmt.Sprintf("%s (pid %d)", s.processName, s.pid)
+	}
+
+	// use a self-identifying session name e.g. mixr.sessions.chrome
+	s.logger = logger.Named(strings.TrimSuffix(s.Key(), ".exe"))
+	s.logger.Debugw(sessionCreationLogMessage, "session", s)
+
+	return s, nil
+}
+
+func newMasterSession(
+	logger *zap.SugaredLogger,
+	volume *wca.IAudioEndpointVolume,
+	eventCtx *ole.GUID,
+	key string,
+	loggerKey string,
+) (*masterSession, error) {
+
+	s := &masterSession{
+		volume:   volume,
+		eventCtx: eventCtx,
+	}
+
+	s.logger = logger.Named(loggerKey)
+	s.master = true
+	s.name = key
+	s.humanReadableDesc = key
+
+	s.logger.Debugw(sessionCreationLogMessage, "session", s)
+
+	return s, nil
+}
+
+func (s *wcaSession) GetVolume() float32 {
+	level, err := s.CurrentVolume()
+	if err != nil {
+		s.logger.Warnw("Failed to get session volume", "error", err)
+	}
+	return level
+}
+
+func (s *wcaSession) CurrentVolume() (float32, error) {
+	if err := s.ensureActive(); err != nil {
+		return 0, err
+	}
+
+	var level float32
+	if err := s.volume.GetMasterVolume(&level); err != nil {
+		return 0, fmt.Errorf("get session volume: %w", err)
+	}
+	return level, nil
+}
+
+func (s *wcaSession) SetVolume(v float32) error {
+	if err := s.volume.SetMasterVolume(v, s.eventCtx); err != nil {
+		s.logger.Warnw("Failed to set session volume", "error", err)
+		return fmt.Errorf("adjust session volume: %w", err)
+	}
+
+	if err := s.ensureActive(); err != nil {
+		return err
+	}
+
+	s.logger.Debugw("Adjusting session volume", "to", fmt.Sprintf("%.2f", v))
+
+	return nil
+}
+
+func (s *wcaSession) CurrentMute() (bool, error) {
+	if err := s.ensureActive(); err != nil {
+		return false, err
+	}
+
+	muted, err := wincom.SimpleAudioVolumeMute(s.volume)
+	if err != nil {
+		return false, fmt.Errorf("get session mute: %w", err)
+	}
+	return muted, nil
+}
+
+func (s *wcaSession) SetMute(muted bool) error {
+	if err := wincom.SetSimpleAudioVolumeMute(s.volume, muted, s.eventCtx); err != nil {
+		return fmt.Errorf("set session mute: %w", err)
+	}
+	if err := s.ensureActive(); err != nil {
+		return err
+	}
+
+	s.logger.Debugw("Adjusting session mute", "muted", muted)
+	return nil
+}
+
+func (s *wcaSession) ensureActive() error {
+	var state uint32
+
+	if err := s.control.GetState(&state); err != nil {
+		s.logger.Warnw("Failed to get session state", "error", err)
+		return fmt.Errorf("get session state: %w", err)
+	}
+
+	if state == wca.AudioSessionStateExpired {
+		s.logger.Warnw("Audio session expired, triggering session refresh")
+		return errRefreshSessions
+	}
+	return nil
+}
+
+func (s *wcaSession) Release() {
+	s.logger.Debug("Releasing audio session")
+
+	s.volume.Release()
+	s.control.Release()
+}
+
+func (s *wcaSession) String() string {
+	return fmt.Sprintf(sessionStringFormat, s.humanReadableDesc, s.GetVolume())
+}
+
+func (s *masterSession) GetVolume() float32 {
+	level, err := s.CurrentVolume()
+	if err != nil {
+		s.logger.Warnw("Failed to get session volume", "error", err)
+	}
+	return level
+}
+
+func (s *masterSession) CurrentVolume() (float32, error) {
+	if s.stale {
+		return 0, errRefreshSessions
+	}
+
+	level, err := wincom.EndpointVolumeLevelScalar(s.volume)
+	if err != nil {
+		return 0, fmt.Errorf("get master volume: %w", err)
+	}
+	return level, nil
+}
+
+func (s *masterSession) SetVolume(v float32) error {
+	if s.stale {
+		s.logger.Warnw("Session expired because default device has changed, triggering session refresh")
+		return errRefreshSessions
+	}
+
+	if err := wincom.SetEndpointVolumeLevelScalar(s.volume, v, s.eventCtx); err != nil {
+		s.logger.Warnw("Failed to set session volume",
+			"error", err,
+			"volume", v)
+
+		return fmt.Errorf("adjust session volume: %w", err)
+	}
+
+	s.logger.Debugw("Adjusting session volume", "to", fmt.Sprintf("%.2f", v))
+
+	return nil
+}
+
+func (s *masterSession) CurrentMute() (bool, error) {
+	if s.stale {
+		return false, errRefreshSessions
+	}
+
+	muted, err := wincom.EndpointVolumeMute(s.volume)
+	if err != nil {
+		return false, fmt.Errorf("get master mute: %w", err)
+	}
+	return muted, nil
+}
+
+func (s *masterSession) SetMute(muted bool) error {
+	if s.stale {
+		return errRefreshSessions
+	}
+
+	if err := wincom.SetEndpointVolumeMute(s.volume, muted, s.eventCtx); err != nil {
+		return fmt.Errorf("set master mute: %w", err)
+	}
+
+	s.logger.Debugw("Adjusting session mute", "muted", muted)
+	return nil
+}
+
+func (s *masterSession) Release() {
+	s.logger.Debug("Releasing audio session")
+
+	s.volume.Release()
+}
+
+func (s *masterSession) String() string {
+	return fmt.Sprintf(sessionStringFormat, s.humanReadableDesc, s.GetVolume())
+}
+
+func (s *masterSession) markAsStale() {
+	s.stale = true
+}

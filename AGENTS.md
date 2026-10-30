@@ -4,7 +4,7 @@
 
 mixr is a fork of deej evolving into a six-channel Windows desktop audio
 controller. The current application is a lightweight Go system-tray process:
-`pkg/deej/cmd` starts the client, `pkg/deej` owns configuration, USB serial,
+`pkg/mixr/cmd` starts the client, `pkg/mixr` owns configuration, USB serial,
 session discovery, and volume control, and Arduino firmware supplies control
 values. Windows Core Audio interop is isolated behind `internal/wincom` where
 the pinned dependency is unsafe.
@@ -34,8 +34,8 @@ is recorded in [baseline validation](docs/BASELINE_VALIDATION.md),
 
 ## Repository map
 
-- `pkg/deej/`: application, tray, configuration, serial, and audio sessions.
-- `pkg/deej/scripts/windows/`: supported Windows build scripts.
+- `pkg/mixr/`: application, tray, configuration, serial, and audio sessions.
+- `pkg/mixr/scripts/windows/`: supported Windows build scripts.
 - `internal/wincom/`: audited native-width COM compatibility layer and ABI tests.
 - `cmd/windows-routing-spike/`: isolated routing diagnostic/feasibility CLI.
 - `arduino/deej-5-sliders-vanilla/`: compatible one-way reference firmware.
@@ -82,8 +82,11 @@ Run relevant tests for both Windows architectures from the repository root:
 foreach ($arch in '386', 'amd64') {
     $env:GOARCH = $arch
     go test -count=1 -buildvcs=false ./...
-    cmd /c "call pkg\deej\scripts\windows\build-dev.bat"
+    cmd /c "call pkg\mixr\scripts\windows\build-dev.bat"
+    cmd /c "call pkg\mixr\scripts\windows\build-release.bat"
     go build -o "windows-routing-spike-$arch.exe" .\cmd\windows-routing-spike
+    go build -o "windows-audio-control-$arch.exe" .\cmd\windows-audio-control
+    go build -o "windows-microphone-control-$arch.exe" .\cmd\windows-microphone-control
 }
 Remove-Item Env:GOARCH
 ```

@@ -17,7 +17,7 @@ import (
 
 	ole "github.com/go-ole/go-ole"
 	wca "github.com/moutend/go-wca"
-	"github.com/omriharel/deej/internal/wincom"
+	"github.com/zak-steenhoek/mixr/internal/wincom"
 )
 
 const eventContextGUID = "{8033cff1-4c1b-4218-94bb-98599bc8d976}"

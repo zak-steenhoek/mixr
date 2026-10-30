@@ -1,4 +1,4 @@
-module github.com/omriharel/deej
+module github.com/zak-steenhoek/mixr
 
 go 1.14
 
