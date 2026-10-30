@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/omriharel/deej/pkg/deej"
+	"github.com/zak-steenhoek/mixr/pkg/mixr"
 	"go.uber.org/zap"
 )
 
@@ -20,7 +20,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	operation := deej.AudioCommandOperation(os.Args[1])
+	operation := mixr.AudioCommandOperation(os.Args[1])
 	flags := flag.NewFlagSet("windows-audio-control "+os.Args[1], flag.ContinueOnError)
 	target := flags.String("target", "master", "master, deej.current, or an application executable such as chrome.exe")
 	steps := flags.Int("steps", 0, "signed number of relative volume steps")
@@ -35,7 +35,7 @@ func main() {
 
 	logger := zap.NewNop()
 
-	executor, err := deej.NewSystemAudioCommandExecutor(logger.Sugar())
+	executor, err := mixr.NewSystemAudioCommandExecutor(logger.Sugar())
 	if err != nil {
 		fatal(err)
 	}
@@ -45,7 +45,7 @@ func main() {
 		}
 	}()
 
-	result, err := executor.ExecuteAudioCommand(deej.AudioCommand{
+	result, err := executor.ExecuteAudioCommand(mixr.AudioCommand{
 		Target:    *target,
 		Operation: operation,
 		Steps:     *steps,
@@ -76,7 +76,7 @@ case-insensitive session key such as chrome.exe. This tool changes live audio
 state for relative-volume, mute, unmute, and toggle-mute.`)
 }
 
-func printResult(result deej.AudioCommandResult) {
+func printResult(result mixr.AudioCommandResult) {
 	fmt.Printf("target: %s\n", result.Target)
 	for index, state := range result.Volumes {
 		fmt.Printf("volume[%d] %s: %.4f\n", index+1, state.SessionKey, state.Volume)

@@ -2,7 +2,7 @@
 // +build windows
 
 // Command windows-routing-spike probes Windows playback routing without using
-// or modifying deej's production audio-session code.
+// or modifying mixr's production audio-session code.
 package main
 
 import (
@@ -18,7 +18,7 @@ import (
 	ole "github.com/go-ole/go-ole"
 	ps "github.com/mitchellh/go-ps"
 	wca "github.com/moutend/go-wca"
-	"github.com/omriharel/deej/internal/wincom"
+	"github.com/zak-steenhoek/mixr/internal/wincom"
 )
 
 const (
