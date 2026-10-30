@@ -10,6 +10,7 @@ import (
 
 	ole "github.com/go-ole/go-ole"
 	wca "github.com/moutend/go-wca"
+	"github.com/omriharel/deej/internal/wincom"
 	"go.uber.org/zap"
 )
 
@@ -148,15 +149,17 @@ func (sf *wcaSessionFinder) GetAllSessions() ([]Session, error) {
 }
 
 func (sf *wcaSessionFinder) Release() error {
-
-	// skip unregistering the mmnotificationclient, as it's not implemented in go-wca
+	var unregisterErr error
 	if sf.mmDeviceEnumerator != nil {
+		unregisterErr = wincom.UnregisterEndpointNotificationCallback(sf.mmDeviceEnumerator, sf.mmNotificationClient)
+		sf.mmNotificationClient = nil
 		sf.mmDeviceEnumerator.Release()
+		sf.mmDeviceEnumerator = nil
 	}
 
 	sf.logger.Debug("Released WCA session finder instance")
 
-	return nil
+	return unregisterErr
 }
 
 func (sf *wcaSessionFinder) getDeviceEnumerator() error {
@@ -202,14 +205,15 @@ func (sf *wcaSessionFinder) registerDefaultDeviceChangeCallback() error {
 	sf.mmNotificationClient = &wca.IMMNotificationClient{}
 	sf.mmNotificationClient.VTable = &wca.IMMNotificationClientVtbl{}
 
-	// fill the VTable with noops, except for OnDefaultDeviceChanged. that one's gold
-	sf.mmNotificationClient.VTable.QueryInterface = syscall.NewCallback(sf.noopCallback)
-	sf.mmNotificationClient.VTable.AddRef = syscall.NewCallback(sf.noopCallback)
-	sf.mmNotificationClient.VTable.Release = syscall.NewCallback(sf.noopCallback)
-	sf.mmNotificationClient.VTable.OnDeviceStateChanged = syscall.NewCallback(sf.noopCallback)
-	sf.mmNotificationClient.VTable.OnDeviceAdded = syscall.NewCallback(sf.noopCallback)
-	sf.mmNotificationClient.VTable.OnDeviceRemoved = syscall.NewCallback(sf.noopCallback)
-	sf.mmNotificationClient.VTable.OnPropertyValueChanged = syscall.NewCallback(sf.noopCallback)
+	// Fill every slot with its native COM signature. Most callbacks are noops,
+	// but their argument counts still matter on 32-bit Windows.
+	sf.mmNotificationClient.VTable.QueryInterface = syscall.NewCallback(sf.notificationQueryInterfaceCallback)
+	sf.mmNotificationClient.VTable.AddRef = syscall.NewCallback(sf.notificationAddRefCallback)
+	sf.mmNotificationClient.VTable.Release = syscall.NewCallback(sf.notificationReleaseCallback)
+	sf.mmNotificationClient.VTable.OnDeviceStateChanged = syscall.NewCallback(sf.deviceStateChangedCallback)
+	sf.mmNotificationClient.VTable.OnDeviceAdded = syscall.NewCallback(sf.deviceAddedCallback)
+	sf.mmNotificationClient.VTable.OnDeviceRemoved = syscall.NewCallback(sf.deviceRemovedCallback)
+	sf.mmNotificationClient.VTable.OnPropertyValueChanged = syscall.NewCallback(sf.propertyValueChangedCallback)
 
 	sf.mmNotificationClient.VTable.OnDefaultDeviceChanged = syscall.NewCallback(sf.defaultDeviceChangedCallback)
 
@@ -225,7 +229,7 @@ func (sf *wcaSessionFinder) getMasterSession(mmDevice *wca.IMMDevice, key string
 
 	var audioEndpointVolume *wca.IAudioEndpointVolume
 
-	if err := mmDevice.Activate(wca.IID_IAudioEndpointVolume, wca.CLSCTX_ALL, nil, &audioEndpointVolume); err != nil {
+	if err := wincom.Activate(mmDevice, wca.IID_IAudioEndpointVolume, wca.CLSCTX_ALL, nil, &audioEndpointVolume); err != nil {
 		sf.logger.Warnw("Failed to activate AudioEndpointVolume for master session", "error", err)
 		return nil, fmt.Errorf("activate master session: %w", err)
 	}
@@ -233,6 +237,7 @@ func (sf *wcaSessionFinder) getMasterSession(mmDevice *wca.IMMDevice, key string
 	// create the master session
 	master, err := newMasterSession(sf.sessionLogger, audioEndpointVolume, sf.eventCtx, key, loggerKey)
 	if err != nil {
+		audioEndpointVolume.Release()
 		sf.logger.Warnw("Failed to create master session instance", "error", err)
 		return nil, fmt.Errorf("create master session: %w", err)
 	}
@@ -249,6 +254,7 @@ func (sf *wcaSessionFinder) enumerateAndAddSessions(sessions *[]Session) error {
 		sf.logger.Warnw("Failed to enumerate active audio endpoints", "error", err)
 		return fmt.Errorf("enumerate active audio endpoints: %w", err)
 	}
+	defer deviceCollection.Release()
 
 	// check how many devices there are
 	var deviceCount uint32
@@ -282,6 +288,8 @@ func (sf *wcaSessionFinder) enumerateAndAddSessions(sessions *[]Session) error {
 
 			return fmt.Errorf("query device %d IMMEndpoint: %w", deviceIdx, err)
 		}
+		endpointType := (*wca.IMMEndpoint)(unsafe.Pointer(dispatch))
+		defer endpointType.Release()
 
 		// get the device's property store
 		var propertyStore *wca.IPropertyStore
@@ -319,10 +327,6 @@ func (sf *wcaSessionFinder) enumerateAndAddSessions(sessions *[]Session) error {
 
 		// device friendly name i.e. "Headphones (Realtek Audio)"
 		endpointFriendlyName := value.String()
-
-		// receive a useful object instead of our dispatch
-		endpointType := (*wca.IMMEndpoint)(unsafe.Pointer(dispatch))
-		defer endpointType.Release()
 
 		var dataFlow uint32
 		if err := endpointType.GetDataFlow(&dataFlow); err != nil {
@@ -383,7 +387,8 @@ func (sf *wcaSessionFinder) enumerateAndAddProcessSessions(
 	// query the given IMMDevice's IAudioSessionManager2 interface
 	var audioSessionManager2 *wca.IAudioSessionManager2
 
-	if err := endpoint.Activate(
+	if err := wincom.Activate(
+		endpoint,
 		wca.IID_IAudioSessionManager2,
 		wca.CLSCTX_ALL,
 		nil,
@@ -404,9 +409,8 @@ func (sf *wcaSessionFinder) enumerateAndAddProcessSessions(
 	defer sessionEnumerator.Release()
 
 	// check how many audio sessions there are
-	var sessionCount int
-
-	if err := sessionEnumerator.GetCount(&sessionCount); err != nil {
+	sessionCount, err := wincom.AudioSessionCount(sessionEnumerator)
+	if err != nil {
 		sf.logger.Warnw("Failed to get session count from session enumerator", "error", err)
 		return fmt.Errorf("get session count: %w", err)
 	}
@@ -429,6 +433,7 @@ func (sf *wcaSessionFinder) enumerateAndAddProcessSessions(
 		// query its IAudioSessionControl2
 		dispatch, err := audioSessionControl.QueryInterface(wca.IID_IAudioSessionControl2)
 		if err != nil {
+			audioSessionControl.Release()
 			sf.logger.Warnw("Failed to query session's IAudioSessionControl2",
 				"error", err,
 				"sessionIdx", sessionIdx)
@@ -454,6 +459,7 @@ func (sf *wcaSessionFinder) enumerateAndAddProcessSessions(
 			// error code (in decimal format).
 			isSystemSoundsErr := audioSessionControl2.IsSystemSoundsSession()
 			if isSystemSoundsErr != nil && !strings.Contains(err.Error(), "143196173") {
+				audioSessionControl2.Release()
 
 				// of course, if it's not the system sounds session, we got a problem
 				sf.logger.Warnw("Failed to query session's pid",
@@ -471,6 +477,7 @@ func (sf *wcaSessionFinder) enumerateAndAddProcessSessions(
 		// get its ISimpleAudioVolume
 		dispatch, err = audioSessionControl2.QueryInterface(wca.IID_ISimpleAudioVolume)
 		if err != nil {
+			audioSessionControl2.Release()
 			sf.logger.Warnw("Failed to query session's ISimpleAudioVolume",
 				"error", err,
 				"sessionIdx", sessionIdx)
@@ -484,6 +491,8 @@ func (sf *wcaSessionFinder) enumerateAndAddProcessSessions(
 		// create the deej session object
 		newSession, err := newWCASession(sf.sessionLogger, audioSessionControl2, simpleAudioVolume, pid, sf.eventCtx)
 		if err != nil {
+			audioSessionControl2.Release()
+			simpleAudioVolume.Release()
 
 			// this could just mean this process is already closed by now, and the session will be cleaned up later by the OS
 			if !errors.Is(err, errNoSuchProcess) {
@@ -494,12 +503,8 @@ func (sf *wcaSessionFinder) enumerateAndAddProcessSessions(
 				return fmt.Errorf("create wca session for session %d: %w", sessionIdx, err)
 			}
 
-			// in this case, log it and release the session's handles, then skip to the next one
-			sf.logger.Debugw("Process already exited, skipping session and releasing handles", "pid", pid)
-
-			audioSessionControl2.Release()
-			simpleAudioVolume.Release()
-
+			// in this case, log it and skip to the next one
+			sf.logger.Debugw("Process already exited, skipping session", "pid", pid)
 			continue
 		}
 
@@ -536,6 +541,30 @@ func (sf *wcaSessionFinder) defaultDeviceChangedCallback(
 
 	return
 }
-func (sf *wcaSessionFinder) noopCallback() (hResult uintptr) {
-	return
+
+func (sf *wcaSessionFinder) notificationQueryInterfaceCallback(this, iid, object uintptr) uintptr {
+	const (
+		eNoInterface = uintptr(0x80004002)
+		ePointer     = uintptr(0x80004003)
+	)
+	if iid == 0 || object == 0 {
+		return ePointer
+	}
+
+	result := (*uintptr)(unsafe.Pointer(object))
+	*result = 0
+	interfaceID := (*ole.GUID)(unsafe.Pointer(iid))
+	if ole.IsEqualGUID(interfaceID, ole.IID_IUnknown) || ole.IsEqualGUID(interfaceID, wca.IID_IMMNotificationClient) {
+		*result = this
+		return 0
+	}
+	return eNoInterface
 }
+
+func (sf *wcaSessionFinder) notificationAddRefCallback(this uintptr) uintptr  { return 1 }
+func (sf *wcaSessionFinder) notificationReleaseCallback(this uintptr) uintptr { return 1 }
+func (sf *wcaSessionFinder) deviceStateChangedCallback(this, deviceID, newState uintptr) uintptr {
+	return 0
+}
+func (sf *wcaSessionFinder) deviceAddedCallback(this, deviceID uintptr) uintptr   { return 0 }
+func (sf *wcaSessionFinder) deviceRemovedCallback(this, deviceID uintptr) uintptr { return 0 }

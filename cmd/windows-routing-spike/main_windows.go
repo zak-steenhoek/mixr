@@ -18,6 +18,7 @@ import (
 	ole "github.com/go-ole/go-ole"
 	ps "github.com/mitchellh/go-ps"
 	wca "github.com/moutend/go-wca"
+	"github.com/omriharel/deej/internal/wincom"
 )
 
 const (
@@ -155,8 +156,7 @@ func enumerate(e *wca.IMMDeviceEnumerator) ([]endpoint, error) {
 	for role := uint32(0); role < 3; role++ {
 		var d *wca.IMMDevice
 		if err := e.GetDefaultAudioEndpoint(eRender, role, &d); err == nil {
-			var id string
-			if d.GetId(&id) == nil {
+			if id, idErr := wincom.DeviceID(d); idErr == nil {
 				x := defaults[id]
 				x[role] = true
 				defaults[id] = x
@@ -179,9 +179,8 @@ func enumerate(e *wca.IMMDeviceEnumerator) ([]endpoint, error) {
 		if err := c.Item(i, &d); err != nil {
 			return nil, err
 		}
-		var id string
 		var state uint32
-		err := d.GetId(&id)
+		id, err := wincom.DeviceID(d)
 		if err == nil {
 			err = d.GetState(&state)
 		}
@@ -225,8 +224,7 @@ func printDefaults() error {
 			if err := e.GetDefaultAudioEndpoint(eRender, uint32(role), &d); err != nil {
 				return err
 			}
-			var id string
-			err := d.GetId(&id)
+			id, err := wincom.DeviceID(d)
 			d.Release()
 			if err != nil {
 				return err
@@ -264,8 +262,8 @@ func listSessions() error {
 }
 
 func printEndpointSessions(d *wca.IMMDevice) error {
-	var id string
-	if err := d.GetId(&id); err != nil {
+	id, err := wincom.DeviceID(d)
+	if err != nil {
 		return err
 	}
 	name := "<unknown>"
@@ -279,7 +277,7 @@ func printEndpointSessions(d *wca.IMMDevice) error {
 	}
 
 	var manager *wca.IAudioSessionManager2
-	if err := activateSessionManager(d, &manager); err != nil {
+	if err := wincom.Activate(d, wca.IID_IAudioSessionManager2, clsctxAll, nil, &manager); err != nil {
 		return fmt.Errorf("activate session manager for %s: %w", name, err)
 	}
 	defer manager.Release()
@@ -288,8 +286,8 @@ func printEndpointSessions(d *wca.IMMDevice) error {
 		return err
 	}
 	defer sessions.Release()
-	var count int
-	if err := sessions.GetCount(&count); err != nil {
+	count, err := wincom.AudioSessionCount(sessions)
+	if err != nil {
 		return err
 	}
 	for i := 0; i < count; i++ {
@@ -314,25 +312,6 @@ func printEndpointSessions(d *wca.IMMDevice) error {
 			processName = process.Executable()
 		}
 		fmt.Printf("endpoint: %s\n  endpoint-id: %s\n  pid: %d\n  process: %s\n", name, id, pid, processName)
-	}
-	return nil
-}
-
-// activateSessionManager avoids the pinned go-wca Activate wrapper, which
-// incorrectly passes &ctx rather than ctx and fails on current Windows builds.
-func activateSessionManager(d *wca.IMMDevice, manager **wca.IAudioSessionManager2) error {
-	hr, _, _ := syscall.Syscall6(
-		d.VTable().Activate,
-		5,
-		uintptr(unsafe.Pointer(d)),
-		uintptr(unsafe.Pointer(wca.IID_IAudioSessionManager2)),
-		uintptr(clsctxAll),
-		0,
-		uintptr(unsafe.Pointer(manager)),
-		0,
-	)
-	if int32(hr) < 0 {
-		return fmt.Errorf("IMMDevice::Activate HRESULT 0x%08x", uint32(hr))
 	}
 	return nil
 }
@@ -374,8 +353,7 @@ func verifyDefaultRoles(want string) error {
 			if err := e.GetDefaultAudioEndpoint(eRender, role, &d); err != nil {
 				return fmt.Errorf("verify default role %d: %w", role, err)
 			}
-			var got string
-			err := d.GetId(&got)
+			got, err := wincom.DeviceID(d)
 			d.Release()
 			if err != nil {
 				return fmt.Errorf("verify default role %d ID: %w", role, err)
