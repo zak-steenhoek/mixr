@@ -25,3 +25,11 @@ baud_rate: 9600
 # adjust the amount of signal noise reduction depending on your hardware quality
 # supported values are "low" (excellent hardware), "default" (regular hardware) or "high" (bad, noisy hardware)
 noise_reduction: default
+
+# EXPERIMENTAL Nano R4 D2 switch / D3 mute LED proof of concept.
+# Requires the separate mixr-hardware-mute-prototype Arduino sketch. Restart
+# mixr after changing these values; config hot-reload is not supported here.
+hardware_mute_prototype:
+  enabled: false
+  target: spotify.exe
+  poll_interval_ms: 500

@@ -27,6 +27,12 @@ type CanonicalConfig struct {
 
 	NoiseReductionLevel string
 
+	HardwareMutePrototype struct {
+		Enabled      bool
+		Target       string
+		PollInterval time.Duration
+	}
+
 	logger             *zap.SugaredLogger
 	notifier           Notifier
 	stopWatcherChannel chan bool
@@ -53,9 +59,15 @@ const (
 	configKeyCOMPort             = "com_port"
 	configKeyBaudRate            = "baud_rate"
 	configKeyNoiseReductionLevel = "noise_reduction"
+	configKeyHardwareMuteEnabled = "hardware_mute_prototype.enabled"
+	configKeyHardwareMuteTarget  = "hardware_mute_prototype.target"
+	configKeyHardwareMutePollMS  = "hardware_mute_prototype.poll_interval_ms"
 
-	defaultCOMPort  = "COM4"
-	defaultBaudRate = 9600
+	defaultCOMPort              = "COM4"
+	defaultBaudRate             = 9600
+	defaultHardwareMuteTarget   = "spotify.exe"
+	defaultHardwareMutePollMS   = 500
+	minimumHardwareMutePollTime = 100 * time.Millisecond
 )
 
 // has to be defined as a non-constant because we're using path.Join
@@ -89,6 +101,9 @@ func NewConfig(logger *zap.SugaredLogger, notifier Notifier) (*CanonicalConfig, 
 	userConfig.SetDefault(configKeyInvertSliders, false)
 	userConfig.SetDefault(configKeyCOMPort, defaultCOMPort)
 	userConfig.SetDefault(configKeyBaudRate, defaultBaudRate)
+	userConfig.SetDefault(configKeyHardwareMuteEnabled, false)
+	userConfig.SetDefault(configKeyHardwareMuteTarget, defaultHardwareMuteTarget)
+	userConfig.SetDefault(configKeyHardwareMutePollMS, defaultHardwareMutePollMS)
 
 	internalConfig := viper.New()
 	internalConfig.SetConfigName(internalConfigName)
@@ -146,7 +161,8 @@ func (cc *CanonicalConfig) Load() error {
 	cc.logger.Infow("Config values",
 		"sliderMapping", cc.SliderMapping,
 		"connectionInfo", cc.ConnectionInfo,
-		"invertSliders", cc.InvertSliders)
+		"invertSliders", cc.InvertSliders,
+		"hardwareMutePrototype", cc.HardwareMutePrototype)
 
 	return nil
 }
@@ -238,6 +254,21 @@ func (cc *CanonicalConfig) populateFromVipers() error {
 
 	cc.InvertSliders = cc.userConfig.GetBool(configKeyInvertSliders)
 	cc.NoiseReductionLevel = cc.userConfig.GetString(configKeyNoiseReductionLevel)
+
+	cc.HardwareMutePrototype.Enabled = cc.userConfig.GetBool(configKeyHardwareMuteEnabled)
+	cc.HardwareMutePrototype.Target = strings.ToLower(strings.TrimSpace(cc.userConfig.GetString(configKeyHardwareMuteTarget)))
+	if cc.HardwareMutePrototype.Target == "" {
+		cc.HardwareMutePrototype.Target = defaultHardwareMuteTarget
+	}
+	pollInterval := time.Duration(cc.userConfig.GetInt(configKeyHardwareMutePollMS)) * time.Millisecond
+	if pollInterval < minimumHardwareMutePollTime {
+		cc.logger.Warnw("Invalid hardware mute poll interval, using default value",
+			"key", configKeyHardwareMutePollMS,
+			"invalidValue", pollInterval,
+			"defaultValue", defaultHardwareMutePollMS*time.Millisecond)
+		pollInterval = defaultHardwareMutePollMS * time.Millisecond
+	}
+	cc.HardwareMutePrototype.PollInterval = pollInterval
 
 	cc.logger.Debug("Populated config fields from vipers")
 

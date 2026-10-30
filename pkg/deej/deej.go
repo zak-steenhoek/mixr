@@ -20,11 +20,12 @@ const (
 
 // Deej is the main entity managing access to all sub-components
 type Deej struct {
-	logger   *zap.SugaredLogger
-	notifier Notifier
-	config   *CanonicalConfig
-	serial   *SerialIO
-	sessions *sessionMap
+	logger                *zap.SugaredLogger
+	notifier              Notifier
+	config                *CanonicalConfig
+	serial                *SerialIO
+	sessions              *sessionMap
+	hardwareMutePrototype *hardwareMutePrototype
 
 	stopChannel chan bool
 	version     string
@@ -96,6 +97,11 @@ func (d *Deej) Initialize() error {
 	if err := d.sessions.initialize(); err != nil {
 		d.logger.Errorw("Failed to initialize session map", "error", err)
 		return fmt.Errorf("init session map: %w", err)
+	}
+
+	if d.config.HardwareMutePrototype.Enabled {
+		d.hardwareMutePrototype = newHardwareMutePrototype(d, d.logger)
+		d.hardwareMutePrototype.Start()
 	}
 
 	// decide whether to run with/without tray
@@ -200,6 +206,9 @@ func (d *Deej) stop() error {
 	d.logger.Info("Stopping")
 
 	d.config.StopWatchingConfigFile()
+	if d.hardwareMutePrototype != nil {
+		d.hardwareMutePrototype.Stop()
+	}
 	d.serial.Stop()
 
 	// release the session map
