@@ -102,3 +102,18 @@ COM port, wiring, and every observed pass/fail result.
 Do not start Windows host integration after this test. Report the observations,
 including any noisy A4 range, reversed direction, duplicate/missed switch line,
 or LED interaction, so the Phase 2 design can use measured hardware behavior.
+
+## User-observed Phase 1 result
+
+On 2026-10-30, the user reported that all three switch/LED pairs worked as
+expected on the first upload. A4 reached `0..1023` while microphone mute was
+open and D7 was off. With microphone mute closed and its red D7 LED on, the A4
+minimum rose reproducibly to approximately `8` while the maximum remained
+`1023`.
+
+This is a small but real hardware-state-dependent ADC offset, not a validated
+zero. Its cause has not yet been isolated; shared ground/supply impedance, LED
+current, and analog noise remain possibilities. Later host filtering and
+deadband choices must tolerate the observation, but must not conceal worsening
+cross-talk. Exact board/core/tool versions and stability duration were not
+reported and are not inferred.
