@@ -56,10 +56,25 @@ final explicit readback was `0.651658`, unmuted.
 
 These checks establish discovery, scalar level access, mute access, mutation
 readback, and polling-based external-change observation on the current machine.
-They do not yet establish audible microphone capture, default capture-endpoint
-switching, or removal/restoration behavior. Those physical cases remain open.
+They do not yet establish audible microphone capture or default capture-endpoint
+switching.
+
+### User-observed removal and external-change evidence
+
+The user supplied a live watcher capture on 2026-10-30. With endpoint ID
+`{0.0.1.00000000}.{57e89eab-f32f-4baa-bf2d-fdf396af2dce}`, the watcher reported
+external level changes through `0.40`, `0.27`, `0.71`, `0.59`, and `0.37`, plus
+an external mute transition to `true` and back to `false`. It then reported
+`default recording endpoint unavailable: Element not found.` when the input was
+removed or disabled. The same running watcher recovered automatically when the
+endpoint returned and reported volume `0.37`, unmuted, with the original ID.
+
+This physically confirms external volume/mute observation and missing-endpoint
+recovery without restarting the diagnostic. Default capture-endpoint switching
+remains untested because the user has no second microphone input; this is an
+explicit equipment limitation, not a failed result.
 
 For both `386` and `amd64`, the full Go test suite, development client build,
 routing-spike build, and microphone-control diagnostic build passed. This
-automated result does not replace the open physical endpoint-switching and
-disconnect/recovery checks or the later integrated hardware regression.
+automated result does not replace the open physical endpoint-switching check or
+the later integrated hardware regression.
