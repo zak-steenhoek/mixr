@@ -12,3 +12,6 @@ releases/
 *.bin
 logs/
 preferences.yaml
+
+# Local captures produced while validating the isolated Windows routing spike.
+stage*-*.txt
