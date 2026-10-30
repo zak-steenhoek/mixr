@@ -166,6 +166,15 @@ previous report, external synchronization for D3, D5, and D7 plus USB
 disconnect/reconnect recovery now pass. Integrated microphone removal/
 restoration and the combined ten-minute soak remain open.
 
+The user then disabled the active Windows recording device while the integrated
+host remained running and confirmed the expected fail-safe behavior. D7 turned
+off, D6 caused no crash or unrelated mute, and the microphone became
+unavailable. After re-enabling the device without restarting mixr, D7 recovered
+to actual Windows mute state, A4 reapplied its absolute position, and D6/A4
+resumed normal control. Integrated recording-endpoint removal and restoration
+therefore pass on the tested hardware. The ten-minute combined stability run is
+in progress and is not yet recorded as passed.
+
 ### Automated integration validation
 
 On 2026-10-30, both `GOARCH=386` and `GOARCH=amd64` passed the full Go test
