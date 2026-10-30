@@ -98,11 +98,12 @@ deej setup remained running during live routing and application-restart tests.
 
 ## Actual results (2026-10-29)
 
-- The 32-bit source compiled with Go 1.27.3. An initial 64-bit run crashed in
+- The 32-bit source compiled with Go 1.27.3. Before the audio-hardening track,
+  an initial 64-bit run crashed in
   the pinned 2019 `go-wca` dependency because its `IMMDevice::GetId` wrapper
-  stores an allocated pointer in `uint32`. The CLI is therefore constrained to
-  `GOARCH=386`, matching the validated deej build. This is a dependency defect,
-  not a Windows API limitation.
+  stored an allocated pointer in `uint32`. The shared compatibility layer now
+  makes the read-only CLI paths valid for both `GOARCH=386` and `GOARCH=amd64`.
+  This was a dependency defect, not a Windows API limitation.
 - `list` successfully enumerated 30 render endpoints in active, disabled,
   not-present, and unplugged states. It reported two active Realtek endpoints.
 - `default` successfully read separate role assignments: Speakers (Realtek) for
@@ -179,7 +180,8 @@ the mutation interfaces, their ABI, or availability. The experiment itself found
 three version/dependency sensitivities: the obsolete PolicyConfig class silently
 did nothing, the per-app setter required a render interface path rather than the
 ordinary endpoint ID, and the pinned `go-wca` wrappers contain unsafe 64-bit and
-`IMMDevice::Activate` defects.
+`IMMDevice::Activate` defects. Current mixr and spike call sites bypass those
+methods through the audited compatibility layer.
 
 A production design must feature-detect failures, verify every mutation by
 reading it back, preserve and restore user settings, enumerate actual Core Audio
