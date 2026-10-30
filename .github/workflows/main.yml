@@ -29,11 +29,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
 
+      - name: Test mixr (Windows, 386 and amd64)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($arch in '386', 'amd64') {
+            $env:GOARCH = $arch
+            go test -count=1 ./...
+          }
+          Remove-Item Env:GOARCH
+
+      - name: Test mixr (Linux)
+        if: runner.os == 'Linux'
+        run: go test -count=1 ./...
+
       - name: Build mixr (Windows)
         if: runner.os == 'Windows'
-        run: pkg/deej/scripts/windows/build-${{ matrix.mode }}.bat
+        run: pkg/mixr/scripts/windows/build-${{ matrix.mode }}.bat
         shell: cmd
 
       - name: Build mixr (Linux)
         if: runner.os == 'Linux'
-        run: pkg/deej/scripts/linux/build-${{ matrix.mode }}.sh
+        run: pkg/mixr/scripts/linux/build-${{ matrix.mode }}.sh

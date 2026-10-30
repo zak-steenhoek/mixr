@@ -12,8 +12,8 @@ delivered as a single Windows system-tray executable.
 **Rationale.** This preserves the proven deej operating model and simple
 deployment. **Consequences.** Native Windows integration remains behind Go/COM
 boundaries; avoid services, installers, and heavy frameworks without a new
-decision. **Limitations.** Current source retains historical `deej` package and
-module names, and Linux heritage exists even though VFinal targets Windows.
+decision. **Limitations.** The module and application package now use mixr
+identity, while Linux heritage exists even though VFinal targets Windows.
 
 ## D-002 — Relative encoders for channel volume (Planned)
 

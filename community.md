@@ -1,4 +1,8 @@
-# Community showcase
+# Upstream deej community showcase
+
+> This historical showcase is inherited from the upstream deej project. Names,
+> links, and descriptions are preserved for attribution and may not describe
+> current mixr hardware or supported functionality.
 
 This is a showcase of `deej` versions built by people around the world. Many of those who featured their builds here regularly hang around in [our Discord server](https://discord.gg/nf88NJu), so you can ask them any questions you might have.
 

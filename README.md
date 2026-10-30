@@ -12,7 +12,7 @@ mixr is based on [deej](https://github.com/omriharel/deej) and preserves compati
 
 mixr consists of a [lightweight desktop client](#features) written in Go and a deej-compatible Arduino hardware setup. [**Check out some versions built by the deej community!**](./community.md)
 
-**[Download the latest release](https://github.com/omriharel/deej/releases/latest) | [Video demonstration](https://youtu.be/VoByJ4USMr8) | [Build video by Tech Always](https://youtu.be/x2yXbFiiAeI)**
+**[Download the latest mixr release](https://github.com/zak-steenhoek/mixr/releases/latest) | [Upstream deej video demonstration](https://youtu.be/VoByJ4USMr8) | [Upstream build video by Tech Always](https://youtu.be/x2yXbFiiAeI)**
 
 ![mixr hardware](assets/build-3d-annotated.png)
 
@@ -55,7 +55,7 @@ mixr is written in Go and is built as a portable executable with no installer re
 - Runs from your system tray
 - Helpful notifications to let you know if something isn't working
 
-> **Looking for the older Python version?** It's no longer maintained, but you can always find it in the [`legacy-python` branch](https://github.com/omriharel/deej/tree/legacy-python).
+> **Looking for the older upstream Python version?** It remains available in deej's [`legacy-python` branch](https://github.com/omriharel/deej/tree/legacy-python).
 
 ## How it works
 
@@ -71,7 +71,7 @@ mixr is written in Go and is built as a portable executable with no installer re
 ### Software
 
 - The code running on the Arduino board is a [C program](./arduino/deej-5-sliders-vanilla/deej-5-sliders-vanilla.ino) constantly writing current slider values over its serial interface
-- The PC runs a lightweight [Go client](./pkg/deej/cmd/main.go) in the background. This client reads the serial stream and adjusts app volumes according to the given configuration file
+- The PC runs a lightweight [Go client](./pkg/mixr/cmd/main.go) in the background. This client reads the serial stream and adjusts app volumes according to the given configuration file
 
 ## Slider mapping (configuration)
 
@@ -185,9 +185,14 @@ With many different 3D-printed designs being added to our [community showcase](.
 
 ### Building from source
 
-If you'd rather build from source or modify mixr, clone this repository and use the [developer scripts](./pkg/deej/scripts). The internal `pkg/deej` path is intentionally retained for V1 compatibility.
+If you'd rather build from source or modify mixr, clone
+`https://github.com/zak-steenhoek/mixr.git` and use the
+[developer scripts](./pkg/mixr/scripts). On Windows, run
+`pkg\mixr\scripts\windows\build-dev.bat` for a console development build or
+`build-release.bat` for the tray-only release build.
 
-Like other Go packages, you can also use the `go get` tool: `go get -u github.com/omriharel/deej`. Please note that the package code now resides in the `pkg/deej` directory, and needs to be imported from there if used inside another project.
+The Go module is `github.com/zak-steenhoek/mixr`, and the application package
+is `github.com/zak-steenhoek/mixr/pkg/mixr`.
 
 If you need any help with this, please [join our Discord server](https://discord.gg/nf88NJu).
 

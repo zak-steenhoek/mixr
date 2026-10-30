@@ -15,7 +15,7 @@ are physically validated.
 
 ## Command model and behavior
 
-`pkg/deej.AudioCommand` is independent of serial transport and represents:
+`pkg/mixr.AudioCommand` is independent of serial transport and represents:
 
 - signed relative-volume movement;
 - explicit mute and unmute;
