@@ -12,6 +12,7 @@ const (
 	prototypeHelloMessage       = prototypeProtocolPrefix + "hello"
 	prototypeReadyMessage       = prototypeProtocolPrefix + "ready"
 	prototypeSpotifyMuteControl = "spotify-mute"
+	prototypeMasterMuteControl  = "master-mute"
 )
 
 type PrototypeSerialEventKind string
