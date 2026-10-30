@@ -62,7 +62,6 @@ func newWCASession(
 		process, err := ps.FindProcess(int(pid))
 		if err != nil {
 			logger.Warnw("Failed to find process name by ID", "pid", pid, "error", err)
-			defer s.Release()
 
 			return nil, fmt.Errorf("find process name by pid: %w", err)
 		}

@@ -6,13 +6,12 @@ modify production audio-session logic, firmware, configuration, or serial code.
 Build from the repository root:
 
 ```powershell
-$env:GOARCH = '386'
+$env:GOARCH = 'amd64' # or '386'
 & 'C:\Program Files\Go\bin\go.exe' build -o windows-routing-spike.exe .\cmd\windows-routing-spike
 ```
 
-The 32-bit target is currently required because the old `go-wca` version pinned
-by deej truncates the pointer returned by `IMMDevice::GetId` in 64-bit builds.
-This is an experiment dependency constraint, not a Windows Core Audio limit.
+The command uses mixr's native-width COM compatibility layer, so both 32-bit
+and 64-bit builds can enumerate endpoint IDs and audio sessions safely.
 
 Run `windows-routing-spike.exe` without arguments for commands. Read
 `docs/WINDOWS_ROUTING_SPIKE.md` before invoking policy-changing commands.
