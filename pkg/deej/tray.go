@@ -14,8 +14,8 @@ func (d *Deej) initializeTray(onDone func()) {
 		logger.Debug("Tray instance ready")
 
 		systray.SetTemplateIcon(icon.DeejLogo, icon.DeejLogo)
-		systray.SetTitle("deej")
-		systray.SetTooltip("deej")
+		systray.SetTitle("mixr")
+		systray.SetTooltip("mixr")
 
 		editConfig := systray.AddMenuItem("Edit configuration", "Open config file with notepad")
 		editConfig.SetIcon(icon.EditConfig)
@@ -30,7 +30,7 @@ func (d *Deej) initializeTray(onDone func()) {
 		}
 
 		systray.AddSeparator()
-		quit := systray.AddMenuItem("Quit", "Stop deej and quit")
+		quit := systray.AddMenuItem("Quit", "Stop mixr and quit")
 
 		// wait on things to happen
 		go func() {

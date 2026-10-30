@@ -1,6 +1,6 @@
 @ECHO OFF
 
-ECHO Building deej (development)...
+ECHO Building mixr (development)...
 
 REM set repo root in relation to script path to avoid cwd dependency
 SET "DEEJ_ROOT=%~dp0..\..\..\.."
@@ -14,13 +14,13 @@ ECHO - gitCommit %GIT_COMMIT%
 ECHO - versionTag %VERSION_TAG%
 ECHO - buildType %BUILD_TYPE%
 
-go build -o "%DEEJ_ROOT%\deej-dev.exe" -ldflags "-X main.gitCommit=%GIT_COMMIT% -X main.versionTag=%VERSION_TAG% -X main.buildType=%BUILD_TYPE%" "%DEEJ_ROOT%\pkg\deej\cmd"
+go build -o "%DEEJ_ROOT%\mixr-dev.exe" -ldflags "-X main.gitCommit=%GIT_COMMIT% -X main.versionTag=%VERSION_TAG% -X main.buildType=%BUILD_TYPE%" "%DEEJ_ROOT%\pkg\deej\cmd"
 if %ERRORLEVEL% NEQ 0 GOTO BUILDERROR
 ECHO Done.
 GOTO DONE
 
 :BUILDERROR
-ECHO Failed to build deej in development mode! See above output for details.
+ECHO Failed to build mixr in development mode! See above output for details.
 EXIT /B 1
 
 :DONE

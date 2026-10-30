@@ -8,6 +8,8 @@ venv/
 *.exe
 deej-dev
 deej-release
+mixr-dev
+mixr-release
 releases/
 *.bin
 logs/

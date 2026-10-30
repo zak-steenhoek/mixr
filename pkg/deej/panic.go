@@ -17,11 +17,9 @@ const (
 	crashlogTimestampFormat = "2006.01.02-15.04.05"
 
 	crashMessage = `-----------------------------------------------------------------
-                        deej crashlog
+                        mixr crashlog
 -----------------------------------------------------------------
-Unfortunately, deej has crashed. This really shouldn't happen!
-If you've just encountered this, please contact @omriharel and attach this error log.
-You can also join the deej Discord server at https://discord.gg/nf88NJu.
+Unfortunately, mixr has crashed. Please attach this error log when reporting the issue.
 -----------------------------------------------------------------
 Time: %s
 Panic occurred: %s

@@ -1,6 +1,8 @@
-# deej
+# mixr
 
-deej is an **open-source hardware volume mixer** for Windows and Linux PCs. It lets you use real-life sliders (like a DJ!) to **seamlessly control the volumes of different apps** (such as your music player, the game you're playing and your voice chat session) without having to stop what you're doing.
+mixr is an **open-source hardware volume mixer** for Windows and Linux PCs. It lets you use real-life sliders or knobs to **seamlessly control the volumes of different apps** without interrupting what you're doing.
+
+mixr is based on [deej](https://github.com/omriharel/deej) and preserves compatibility with its Arduino firmware, serial protocol, configuration format, and special mapping names such as `deej.current` and `deej.unmapped`.
 
 **Join the [deej Discord server](https://discord.gg/nf88NJu) if you need help or have any questions!**
 
@@ -8,11 +10,11 @@ deej is an **open-source hardware volume mixer** for Windows and Linux PCs. It l
 
 > **_New:_** [work-in-progress deej FAQ](./docs/faq/faq.md)!
 
-deej consists of a [lightweight desktop client](#features) written in Go, and an Arduino-based hardware setup that's simple and cheap to build. [**Check out some versions built by members of our community!**](./community.md)
+mixr consists of a [lightweight desktop client](#features) written in Go and a deej-compatible Arduino hardware setup. [**Check out some versions built by the deej community!**](./community.md)
 
 **[Download the latest release](https://github.com/omriharel/deej/releases/latest) | [Video demonstration](https://youtu.be/VoByJ4USMr8) | [Build video by Tech Always](https://youtu.be/x2yXbFiiAeI)**
 
-![deej](assets/build-3d-annotated.png)
+![mixr hardware](assets/build-3d-annotated.png)
 
 > _**Psst!** [No 3D printer? No problem!](./assets/build-shoebox.jpg)_ You can build deej on some cardboard, a shoebox or even a breadboard :)
 
@@ -39,7 +41,7 @@ deej consists of a [lightweight desktop client](#features) written in Go, and an
 
 ## Features
 
-deej is written in Go and [distributed](https://github.com/omriharel/deej/releases/latest) as a portable (no installer needed) executable.
+mixr is written in Go and is built as a portable executable with no installer required.
 
 - Bind apps to different sliders
   - Bind multiple apps per slider (i.e. one slider for all your games)
@@ -73,11 +75,11 @@ deej is written in Go and [distributed](https://github.com/omriharel/deej/releas
 
 ## Slider mapping (configuration)
 
-deej uses a simple YAML-formatted configuration file named [`config.yaml`](./config.yaml), placed alongside the deej executable.
+mixr uses a simple YAML-formatted configuration file named [`config.yaml`](./config.yaml), placed alongside the mixr executable.
 
 The config file determines which applications (and devices) are mapped to which sliders, and which parameters to use for the connection to the Arduino board, as well as other user preferences.
 
-**This file auto-reloads when its contents are changed, so you can change application mappings on-the-fly without restarting deej.**
+**This file auto-reloads when its contents are changed, so you can change application mappings on-the-fly without restarting mixr.**
 
 It looks like this:
 
@@ -117,7 +119,7 @@ noise_reduction: default
 
 ## Build your own!
 
-Building deej is very simple. You only need a few relatively cheap parts - it's an excellent starter project (and my first Arduino project, personally). Remember that if you need any help or have a question that's not answered here, you can always [join the deej Discord server](https://discord.gg/nf88NJu).
+Building mixr-compatible hardware is simple and inexpensive. The existing deej hardware guides and community resources remain applicable because mixr preserves the firmware and serial protocol.
 
 Build deej for yourself, or as an awesome gift for your gaming buddies!
 
@@ -161,7 +163,7 @@ With many different 3D-printed designs being added to our [community showcase](.
   - _Important:_ If you have more or less than 5 sliders, you must edit the sketch to match what you have
 - After flashing, check the serial monitor. You should see a constant stream of values separated by a pipe (`|`) character, e.g. `0|240|1023|0|483`
   - When you move a slider, its corresponding value should move between 0 and 1023
-- Congratulations, you're now ready to run the deej executable!
+- Congratulations, you're now ready to run the mixr executable!
 
 ## How to run
 
@@ -177,13 +179,13 @@ With many different 3D-printed designs being added to our [community showcase](.
 
 ### Download and installation
 
-- Head over to the [releases page](https://github.com/omriharel/deej/releases) and download the [latest version](https://github.com/omriharel/deej/releases/latest)'s executable and configuration file (`deej.exe` and `config.yaml`)
-- Place them in the same directory anywhere on your machine
-- (Optional, on Windows) Create a shortcut to `deej.exe` and copy it to `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup` to have deej run on boot
+- V1 development builds are named `mixr-dev.exe`; release builds are named `mixr-release.exe` and packaged as `mixr.exe`.
+- Place the executable and `config.yaml` in the same directory anywhere on your machine.
+- (Optional, on Windows) Create a shortcut to `mixr.exe` and copy it to `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup` to have mixr run on boot.
 
 ### Building from source
 
-If you'd rather not download a compiled executable, or want to extend deej or modify it to your needs, feel free to clone the repository and build it yourself. All you need is a Go 1.14 (or above) environment on your machine. If you go this route, make sure to check out the [developer scripts](./pkg/deej/scripts).
+If you'd rather build from source or modify mixr, clone this repository and use the [developer scripts](./pkg/deej/scripts). The internal `pkg/deej` path is intentionally retained for V1 compatibility.
 
 Like other Go packages, you can also use the `go get` tool: `go get -u github.com/omriharel/deej`. Please note that the package code now resides in the `pkg/deej` directory, and needs to be imported from there if used inside another project.
 

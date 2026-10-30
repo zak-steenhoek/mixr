@@ -111,7 +111,7 @@ func (cc *CanonicalConfig) Load() error {
 	if !util.FileExists(userConfigFilepath) {
 		cc.logger.Warnw("Config file not found", "path", userConfigFilepath)
 		cc.notifier.Notify("Can't find configuration!",
-			fmt.Sprintf("%s must be in the same directory as deej. Please re-launch", userConfigFilepath))
+			fmt.Sprintf("%s must be in the same directory as mixr. Please re-launch", userConfigFilepath))
 
 		return fmt.Errorf("config file doesn't exist: %s", userConfigFilepath)
 	}
@@ -125,7 +125,7 @@ func (cc *CanonicalConfig) Load() error {
 			cc.notifier.Notify("Invalid configuration!",
 				fmt.Sprintf("Please make sure %s is in a valid YAML format.", userConfigFilepath))
 		} else {
-			cc.notifier.Notify("Error loading configuration!", "Please check deej's logs for more details.")
+			cc.notifier.Notify("Error loading configuration!", "Please check mixr's logs for more details.")
 		}
 
 		return fmt.Errorf("read user config: %w", err)

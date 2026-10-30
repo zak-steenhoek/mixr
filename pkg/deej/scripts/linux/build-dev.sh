@@ -1,6 +1,6 @@
 #!/bin/sh
 
-echo 'Building deej (development)...'
+echo 'Building mixr (development)...'
 
 # shove git commit, version tag into env
 GIT_COMMIT=$(git rev-list -1 --abbrev-commit HEAD)
@@ -11,10 +11,10 @@ echo "- gitCommit $GIT_COMMIT"
 echo "- versionTag $VERSION_TAG"
 echo "- buildType $BUILD_TYPE"
 
-go build -o deej-dev -ldflags "-X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" ./pkg/deej/cmd
+go build -o mixr-dev -ldflags "-X main.gitCommit=$GIT_COMMIT -X main.versionTag=$VERSION_TAG -X main.buildType=$BUILD_TYPE" ./pkg/deej/cmd
 if [ $? -eq 0 ]; then
     echo 'Done.'
 else
-    echo 'Error: "go build" exited with a non-zero code. Are you running this script from the root deej directory?'
+    echo 'Error: "go build" exited with a non-zero code. Are you running this script from the repository root?'
     exit 1
 fi
