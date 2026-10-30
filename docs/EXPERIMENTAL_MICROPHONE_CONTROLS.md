@@ -175,6 +175,19 @@ resumed normal control. Integrated recording-endpoint removal and restoration
 therefore pass on the tested hardware. The ten-minute combined stability run is
 in progress and is not yet recorded as passed.
 
+The user subsequently completed the combined approximately ten-minute practical
+run and reported it as a pass. The run included the three mute controls and
+indicators, A0–A4, external Windows mute changes, and USB reconnect behavior;
+no stale LED, unintended toggle, stalled control, reconnect loop, crash, or
+unusual log was reported. This is hands-on stability evidence, not an
+instrumented serial-traffic, memory, or long-duration stress measurement.
+
+The integrated physical checklist is complete for the available equipment.
+Default recording-endpoint switching remains explicitly untested because no
+second microphone input is available. Arduino CLI compilation also remains
+unavailable in the automated environment; the uploaded sketch's behavior is
+supported by the user's physical results.
+
 ### Automated integration validation
 
 On 2026-10-30, both `GOARCH=386` and `GOARCH=amd64` passed the full Go test
@@ -189,3 +202,7 @@ legacy frames.
 documented pre-existing unbuffered `signal.Notify` warning in
 `pkg/deej/util/util.go`. Arduino CLI is unavailable, so the integrated sketch
 was source-reviewed but not compiled in this environment.
+
+After the D5 bounded-resend fix and final physical pass, the same complete
+`386`/`amd64` test and build matrix passed again. The final vet rerun again
+reported only that documented pre-existing warning.
