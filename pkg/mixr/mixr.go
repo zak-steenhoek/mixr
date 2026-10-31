@@ -3,9 +3,12 @@
 package mixr
 
 import (
-	"errors"
 	"fmt"
 	"os"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
 
 	"go.uber.org/zap"
 
@@ -29,7 +32,11 @@ type Mixr struct {
 	hardwareMutePrototype *hardwareMutePrototype
 
 	stopChannel chan bool
+	stopOnce    sync.Once
 	version     string
+	buildType   string
+	versionTag  string
+	gitCommit   string
 	verbose     bool
 }
 
@@ -86,7 +93,12 @@ func NewMixr(logger *zap.SugaredLogger, verbose bool) (*Mixr, error) {
 
 // Initialize sets up components and starts to run in the background
 func (d *Mixr) Initialize() error {
-	d.logger.Debug("Initializing")
+	d.logger.Infow("Starting mixr",
+		"version", d.displayVersion(),
+		"buildType", valueOrUnknown(d.buildType),
+		"gitCommit", valueOrUnknown(d.gitCommit),
+		"goos", runtime.GOOS,
+		"goarch", runtime.GOARCH)
 
 	// load the config for the first time
 	if err := d.config.Load(); err != nil {
@@ -99,6 +111,7 @@ func (d *Mixr) Initialize() error {
 		d.logger.Errorw("Failed to initialize session map", "error", err)
 		return fmt.Errorf("init session map: %w", err)
 	}
+	d.logStartupDiagnostics()
 
 	if d.config.HardwareMutePrototype.Enabled {
 		d.hardwareMutePrototype = newHardwareMutePrototype(d, d.logger)
@@ -125,6 +138,13 @@ func (d *Mixr) Initialize() error {
 // SetVersion causes mixr to add a version string to its tray menu if called before Initialize.
 func (d *Mixr) SetVersion(version string) {
 	d.version = version
+}
+
+// SetBuildInfo records build metadata for startup diagnostics and the About menu.
+func (d *Mixr) SetBuildInfo(buildType, versionTag, gitCommit string) {
+	d.buildType = buildType
+	d.versionTag = versionTag
+	d.gitCommit = gitCommit
 }
 
 // Verbose returns whether mixr is running in verbose mode.
@@ -160,28 +180,12 @@ func (d *Mixr) run() {
 	// connect to the arduino for the first time
 	go func() {
 		if err := d.serial.Start(); err != nil {
-			d.logger.Warnw("Failed to start first-time serial connection", "error", err)
-
-			// If the port is busy, that's because something else is connected - notify and quit
-			if errors.Is(err, os.ErrPermission) {
-				d.logger.Warnw("Serial port seems busy, notifying user and closing",
-					"comPort", d.config.ConnectionInfo.COMPort)
-
-				d.notifier.Notify(fmt.Sprintf("Can't connect to %s!", d.config.ConnectionInfo.COMPort),
-					"This serial port is busy, make sure to close any serial monitor or other mixr instance.")
-
-				d.signalStop()
-
-				// also notify if the COM port they gave isn't found, maybe their config is wrong
-			} else if errors.Is(err, os.ErrNotExist) {
-				d.logger.Warnw("Provided COM port seems wrong, notifying user and closing",
-					"comPort", d.config.ConnectionInfo.COMPort)
-
-				d.notifier.Notify(fmt.Sprintf("Can't connect to %s!", d.config.ConnectionInfo.COMPort),
-					"This serial port doesn't exist, check your configuration and make sure it's set correctly.")
-
-				d.signalStop()
-			}
+			d.logger.Warnw("Initial serial connection failed; retrying in the background",
+				"comPort", d.config.ConnectionInfo.COMPort,
+				"baudRate", d.config.ConnectionInfo.BaudRate,
+				"error", err)
+			d.notifier.Notify(fmt.Sprintf("Waiting for %s", d.config.ConnectionInfo.COMPort),
+				"mixr could not open the configured serial port and will keep retrying. Check the cable, port setting, and other serial-monitor applications.")
 		}
 	}()
 
@@ -205,8 +209,10 @@ func noTrayRequested() bool {
 }
 
 func (d *Mixr) signalStop() {
-	d.logger.Debug("Signalling stop channel")
-	d.stopChannel <- true
+	d.stopOnce.Do(func() {
+		d.logger.Debug("Signalling stop channel")
+		d.stopChannel <- true
+	})
 }
 
 func (d *Mixr) stop() error {
@@ -230,4 +236,75 @@ func (d *Mixr) stop() error {
 	d.logger.Sync()
 
 	return nil
+}
+
+func (d *Mixr) displayVersion() string {
+	if d.version != "" {
+		return d.version
+	}
+	if d.versionTag != "" {
+		return d.versionTag
+	}
+	if d.gitCommit != "" {
+		return d.gitCommit
+	}
+	return "development (build metadata unavailable)"
+}
+
+func valueOrUnknown(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+	return value
+}
+
+func (d *Mixr) logStartupDiagnostics() {
+	d.logger.Infow("Hardware control configuration",
+		"legacyAnalogProtocol", "newline-delimited 0..1023 values separated by |",
+		"adcRange", "0..1023",
+		"analogMappings", d.config.SliderMapping,
+		"hardwareMuteEnabled", d.config.HardwareMutePrototype.Enabled,
+		"hardwareMuteTarget", d.config.HardwareMutePrototype.Target,
+		"microphoneAnalogEnabled", d.config.HardwareMutePrototype.Enabled,
+		"microphoneInverted", d.config.HardwareMutePrototype.MicrophoneLevelInverted,
+		"microphoneDeadbandADC", d.config.HardwareMutePrototype.MicrophoneLevelDeadband,
+		"hardwarePollInterval", d.config.HardwareMutePrototype.PollInterval)
+
+	counts := d.sessions.sessionCounts()
+	d.logger.Infow("Windows audio endpoint availability",
+		"defaultPlayback", counts[masterSessionName] > 0,
+		"defaultRecording", counts[inputSessionName] > 0)
+	if counts[inputSessionName] == 0 && d.config.HardwareMutePrototype.Enabled {
+		d.logger.Warn("Default recording endpoint is unavailable; microphone level/mute controls will recover after an endpoint appears")
+	}
+
+	targetSet := make(map[string]struct{})
+	d.config.SliderMapping.iterate(func(_ int, targets []string) {
+		for _, target := range targets {
+			targetSet[strings.ToLower(strings.TrimSpace(target))] = struct{}{}
+		}
+	})
+	if d.config.HardwareMutePrototype.Enabled {
+		targetSet[d.config.HardwareMutePrototype.Target] = struct{}{}
+		targetSet[masterSessionName] = struct{}{}
+		targetSet[inputSessionName] = struct{}{}
+	}
+	targets := make([]string, 0, len(targetSet))
+	for target := range targetSet {
+		if target != "" {
+			targets = append(targets, target)
+		}
+	}
+	sort.Strings(targets)
+	for _, target := range targets {
+		if strings.HasPrefix(target, specialTargetTransformPrefix) {
+			d.logger.Infow("Configured dynamic audio target", "target", target)
+			continue
+		}
+		if counts[target] == 0 {
+			d.logger.Warnw("Configured audio target is currently unavailable; mixr will retry during session refresh", "target", target)
+		} else {
+			d.logger.Infow("Configured audio target available", "target", target, "sessions", counts[target])
+		}
+	}
 }

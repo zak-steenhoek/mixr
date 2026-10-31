@@ -359,3 +359,14 @@ func (m *sessionMap) String() string {
 
 	return fmt.Sprintf("<%d audio sessions>", sessionCount)
 }
+
+func (m *sessionMap) sessionCounts() map[string]int {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	counts := make(map[string]int, len(m.m))
+	for key, sessions := range m.m {
+		counts[key] = len(sessions)
+	}
+	return counts
+}

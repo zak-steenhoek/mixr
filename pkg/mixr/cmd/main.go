@@ -47,6 +47,7 @@ func main() {
 	if err != nil {
 		named.Fatalw("Failed to create mixr object", "error", err)
 	}
+	d.SetBuildInfo(buildType, versionTag, gitCommit)
 
 	// if injected by build process, set version info to show up in the tray
 	if buildType != "" && (versionTag != "" || gitCommit != "") {
