@@ -33,6 +33,8 @@ type SerialIO struct {
 	connected            bool
 	stopping             bool
 	reconnectScheduled   bool
+	connectionState      SerialConnectionState
+	statusConsumers      []chan SerialConnectionState
 	lifecycle            uint64
 	connectionGeneration uint64
 	connOptions          serial.OpenOptions
@@ -47,7 +49,19 @@ type SerialIO struct {
 	sliderMoveConsumers        []chan SliderMoveEvent
 	lastKnownNumSliders        int
 	currentSliderPercentValues []float32
+	reconnectDelay             time.Duration
+	lastMalformedWarning       time.Time
+	malformedSinceWarning      int
 }
+
+// SerialConnectionState is the user-facing lifecycle state shown in the tray.
+type SerialConnectionState string
+
+const (
+	SerialDisconnected SerialConnectionState = "disconnected"
+	SerialReconnecting SerialConnectionState = "reconnecting"
+	SerialConnected    SerialConnectionState = "connected"
+)
 
 // SliderMoveEvent represents a single slider move captured by mixr.
 type SliderMoveEvent struct {
@@ -71,6 +85,8 @@ func NewSerialIO(mixr *Mixr, logger *zap.SugaredLogger) (*SerialIO, error) {
 		lastIndicatorSentAt: make(map[string]time.Time),
 		prototypeConsumers:  []chan PrototypeSerialEvent{},
 		sliderMoveConsumers: []chan SliderMoveEvent{},
+		connectionState:     SerialDisconnected,
+		statusConsumers:     []chan SerialConnectionState{},
 		openPort:            serial.Open,
 	}
 
@@ -92,9 +108,14 @@ func (sio *SerialIO) Start() error {
 	sio.prototypeEnabled = sio.mixr.config.HardwareMutePrototype.Enabled
 	sio.lifecycle++
 	lifecycle := sio.lifecycle
+	sio.setConnectionStateLocked(SerialReconnecting)
 	sio.stateMu.Unlock()
 
-	return sio.openConnection(lifecycle)
+	err := sio.openConnection(lifecycle)
+	if err != nil {
+		sio.scheduleReconnect(lifecycle)
+	}
+	return err
 }
 
 func (sio *SerialIO) openConnection(lifecycle uint64) error {
@@ -135,7 +156,7 @@ func (sio *SerialIO) openConnection(lifecycle uint64) error {
 	}
 	conn, err := opener(options)
 	if err != nil {
-		sio.logger.Warnw("Failed to open serial connection", "error", err)
+		sio.logger.Debugw("Serial connection attempt failed", "comPort", options.PortName, "error", err)
 		return fmt.Errorf("open serial connection: %w", err)
 	}
 
@@ -153,6 +174,7 @@ func (sio *SerialIO) openConnection(lifecycle uint64) error {
 	sio.prototypeReady = false
 	sio.lastIndicatorStates = make(map[string]bool)
 	sio.lastIndicatorSentAt = make(map[string]time.Time)
+	sio.setConnectionStateLocked(SerialConnected)
 	sio.stateMu.Unlock()
 
 	namedLogger := sio.logger.Named(strings.ToLower(options.PortName))
@@ -180,6 +202,7 @@ func (sio *SerialIO) Stop() {
 	sio.prototypeReady = false
 	sio.lastIndicatorStates = make(map[string]bool)
 	sio.lastIndicatorSentAt = make(map[string]time.Time)
+	sio.setConnectionStateLocked(SerialDisconnected)
 	sio.stateMu.Unlock()
 
 	if conn == nil {
@@ -206,6 +229,18 @@ func (sio *SerialIO) SubscribeToSliderMoveEvents() chan SliderMoveEvent {
 func (sio *SerialIO) SubscribeToPrototypeEvents() chan PrototypeSerialEvent {
 	ch := make(chan PrototypeSerialEvent, 16)
 	sio.prototypeConsumers = append(sio.prototypeConsumers, ch)
+	return ch
+}
+
+// SubscribeToConnectionStatus returns a buffered stream whose first value is
+// the current state. Slow consumers receive the newest state without blocking
+// serial I/O.
+func (sio *SerialIO) SubscribeToConnectionStatus() <-chan SerialConnectionState {
+	sio.stateMu.Lock()
+	defer sio.stateMu.Unlock()
+	ch := make(chan SerialConnectionState, 1)
+	ch <- sio.connectionState
+	sio.statusConsumers = append(sio.statusConsumers, ch)
 	return ch
 }
 
@@ -272,7 +307,10 @@ func (sio *SerialIO) handleDisconnect(logger *zap.SugaredLogger, conn io.ReadWri
 	shouldReconnect := !sio.stopping
 	if shouldReconnect && !sio.reconnectScheduled {
 		sio.reconnectScheduled = true
+		sio.setConnectionStateLocked(SerialReconnecting)
 		go sio.reconnectLoop(lifecycle)
+	} else if !shouldReconnect {
+		sio.setConnectionStateLocked(SerialDisconnected)
 	}
 	sio.stateMu.Unlock()
 
@@ -283,7 +321,11 @@ func (sio *SerialIO) handleDisconnect(logger *zap.SugaredLogger, conn io.ReadWri
 }
 
 func (sio *SerialIO) reconnectLoop(lifecycle uint64) {
-	const retryDelay = time.Second
+	retryDelay := sio.reconnectDelay
+	if retryDelay <= 0 {
+		retryDelay = time.Second
+	}
+	lastWarning := time.Time{}
 	for {
 		sio.stateMu.RLock()
 		canceled := sio.stopping || sio.lifecycle != lifecycle
@@ -298,11 +340,28 @@ func (sio *SerialIO) reconnectLoop(lifecycle uint64) {
 			sio.logger.Info("Reconnected serial device")
 			sio.finishReconnect(lifecycle)
 			return
+		} else if lastWarning.IsZero() || time.Since(lastWarning) >= 30*time.Second {
+			sio.logger.Warnw("Serial device remains unavailable; retrying",
+				"comPort", sio.mixr.config.ConnectionInfo.COMPort,
+				"retryDelay", retryDelay,
+				"error", err)
+			lastWarning = time.Now()
 		} else if sio.mixr.Verbose() {
 			sio.logger.Debugw("Serial reconnect attempt failed", "error", err)
 		}
 		<-time.After(retryDelay)
 	}
+}
+
+func (sio *SerialIO) scheduleReconnect(lifecycle uint64) {
+	sio.stateMu.Lock()
+	defer sio.stateMu.Unlock()
+	if sio.stopping || sio.lifecycle != lifecycle || sio.connected || sio.reconnectScheduled {
+		return
+	}
+	sio.reconnectScheduled = true
+	sio.setConnectionStateLocked(SerialReconnecting)
+	go sio.reconnectLoop(lifecycle)
 }
 
 func (sio *SerialIO) finishReconnect(lifecycle uint64) {
@@ -315,12 +374,18 @@ func (sio *SerialIO) finishReconnect(lifecycle uint64) {
 
 func (sio *SerialIO) prototypeHandshake(logger *zap.SugaredLogger, lifecycle, generation uint64) {
 	const retryInterval = 750 * time.Millisecond
+	started := time.Now()
+	lastWarning := time.Time{}
 	for {
 		sio.stateMu.RLock()
 		active := !sio.stopping && sio.connected && sio.lifecycle == lifecycle && sio.connectionGeneration == generation
 		ready := sio.prototypeReady
 		sio.stateMu.RUnlock()
-		if !active || ready {
+		if !active {
+			return
+		}
+		if ready {
+			logger.Infow("Prototype handshake complete", "generation", generation, "elapsed", time.Since(started).Round(time.Millisecond))
 			return
 		}
 
@@ -330,6 +395,12 @@ func (sio *SerialIO) prototypeHandshake(logger *zap.SugaredLogger, lifecycle, ge
 		}
 		if sio.mixr.Verbose() {
 			logger.Debug("Sent prototype hello")
+		}
+		if time.Since(started) >= 5*time.Second && (lastWarning.IsZero() || time.Since(lastWarning) >= 30*time.Second) {
+			logger.Warnw("Waiting for prototype ready response; legacy slider frames remain supported",
+				"generation", generation,
+				"elapsed", time.Since(started).Round(time.Second))
+			lastWarning = time.Now()
 		}
 		<-time.After(retryInterval)
 	}
@@ -404,6 +475,7 @@ func (sio *SerialIO) handleLine(logger *zap.SugaredLogger, line string) {
 
 	// Legacy frames retain their exact parser and delivery path.
 	if !expectedLinePattern.MatchString(line) {
+		sio.reportMalformedLine(logger, line)
 		return
 	}
 	sio.handleSliderLine(logger, line)
@@ -455,6 +527,17 @@ func (sio *SerialIO) handleSliderLine(logger *zap.SugaredLogger, line string) {
 	splitLine := strings.Split(line, "|")
 	numSliders := len(splitLine)
 
+	values := make([]int, numSliders)
+	for sliderIdx, stringValue := range splitLine {
+		number, err := strconv.Atoi(stringValue)
+		if err != nil || number < 0 || number > 1023 {
+			sio.sliderMu.Unlock()
+			sio.reportMalformedLine(logger, line)
+			return
+		}
+		values[sliderIdx] = number
+	}
+
 	if numSliders != sio.lastKnownNumSliders {
 		logger.Infow("Detected sliders", "amount", numSliders)
 		sio.lastKnownNumSliders = numSliders
@@ -465,13 +548,7 @@ func (sio *SerialIO) handleSliderLine(logger *zap.SugaredLogger, line string) {
 	}
 
 	moveEvents := []SliderMoveEvent{}
-	for sliderIdx, stringValue := range splitLine {
-		number, _ := strconv.Atoi(stringValue)
-		if sliderIdx == 0 && number > 1023 {
-			sio.logger.Debugw("Got malformed line from serial, ignoring", "line", line)
-			sio.sliderMu.Unlock()
-			return
-		}
+	for sliderIdx, number := range values {
 
 		dirtyFloat := float32(number) / 1023.0
 		normalizedScalar := util.NormalizeScalar(dirtyFloat)
@@ -492,6 +569,46 @@ func (sio *SerialIO) handleSliderLine(logger *zap.SugaredLogger, line string) {
 	for _, consumer := range sio.sliderMoveConsumers {
 		for _, moveEvent := range moveEvents {
 			consumer <- moveEvent
+		}
+	}
+}
+
+func (sio *SerialIO) reportMalformedLine(logger *zap.SugaredLogger, line string) {
+	sio.stateMu.Lock()
+	sio.malformedSinceWarning++
+	now := time.Now()
+	if !sio.lastMalformedWarning.IsZero() && now.Sub(sio.lastMalformedWarning) < 10*time.Second {
+		sio.stateMu.Unlock()
+		return
+	}
+	count := sio.malformedSinceWarning
+	sio.malformedSinceWarning = 0
+	sio.lastMalformedWarning = now
+	sio.stateMu.Unlock()
+
+	logger.Warnw("Ignored malformed serial message",
+		"messagesSinceLastWarning", count,
+		"bytes", len(line),
+		"expected", "legacy 0..1023 pipe-delimited frame or recognized mixr:v1 message")
+}
+
+func (sio *SerialIO) setConnectionStateLocked(state SerialConnectionState) {
+	if sio.connectionState == state {
+		return
+	}
+	sio.connectionState = state
+	for _, consumer := range sio.statusConsumers {
+		select {
+		case consumer <- state:
+		default:
+			select {
+			case <-consumer:
+			default:
+			}
+			select {
+			case consumer <- state:
+			default:
+			}
 		}
 	}
 }

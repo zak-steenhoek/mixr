@@ -1,6 +1,7 @@
 package mixr
 
 import (
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -64,6 +65,56 @@ func TestSerialLineParsingKeepsLegacyFramesSeparate(t *testing.T) {
 	analogEvent := <-prototypeEvents
 	if analogEvent.Kind != PrototypeSerialAnalogEvent || analogEvent.AnalogValue != 512 {
 		t.Fatalf("fifth prototype event = %#v, want A4 value 512", analogEvent)
+	}
+}
+
+func TestMalformedAndTruncatedSerialMessagesAreIgnored(t *testing.T) {
+	config := &CanonicalConfig{}
+	config.NoiseReductionLevel = defaultNoiseReductionLevel
+	mixr := &Mixr{config: config}
+	sliderEvents := make(chan SliderMoveEvent, 8)
+	prototypeEvents := make(chan PrototypeSerialEvent, 8)
+	sio := &SerialIO{
+		mixr:                mixr,
+		logger:              zap.NewNop().Sugar(),
+		lastIndicatorStates: make(map[string]bool),
+		sliderMoveConsumers: []chan SliderMoveEvent{sliderEvents},
+		prototypeConsumers:  []chan PrototypeSerialEvent{prototypeEvents},
+		prototypeEnabled:    true,
+	}
+
+	for _, line := range []string{
+		"0|256|\r\n",
+		"0|2048|512|1023\r\n",
+		"0|256|broken|1023\r\n",
+		"mixr:v1:event:switch:spotify-mute:\r\n",
+		"mixr:v1:event:analog:microphone-level:1024\r\n",
+		"partial without newline",
+	} {
+		sio.handleLine(sio.logger, line)
+	}
+	if len(sliderEvents) != 0 || len(prototypeEvents) != 0 {
+		t.Fatalf("malformed input emitted slider=%d prototype=%d events", len(sliderEvents), len(prototypeEvents))
+	}
+}
+
+func TestDuplicateReadyAndUnexpectedOrderingDoNotReplayEvents(t *testing.T) {
+	config := &CanonicalConfig{}
+	mixr := &Mixr{config: config}
+	events := make(chan PrototypeSerialEvent, 8)
+	sio := &SerialIO{
+		mixr:               mixr,
+		logger:             zap.NewNop().Sugar(),
+		prototypeConsumers: []chan PrototypeSerialEvent{events},
+		prototypeEnabled:   true,
+	}
+
+	sio.handleLine(sio.logger, "mixr:v1:event:switch:spotify-mute:1\r\n")
+	sio.handleLine(sio.logger, "mixr:v1:ready\r\n")
+	sio.handleLine(sio.logger, "mixr:v1:ready\r\n")
+	sio.handleLine(sio.logger, "mixr:v1:event:switch:spotify-mute:1\r\n")
+	if len(events) != 2 {
+		t.Fatalf("event count = %d, want one ready and one switch", len(events))
 	}
 }
 
@@ -219,6 +270,62 @@ func TestSerialReconnectsAfterEstablishedConnectionLoss(t *testing.T) {
 	openerMu.Unlock()
 	if gotOpenCount != 2 {
 		t.Fatalf("open count = %d, want initial + one reconnect", gotOpenCount)
+	}
+}
+
+func TestSerialRetriesAfterInitialOpenFailure(t *testing.T) {
+	config := &CanonicalConfig{}
+	config.ConnectionInfo.COMPort = "TEST"
+	config.ConnectionInfo.BaudRate = 9600
+	mixr := &Mixr{config: config}
+	connected := newControlledSerialConn()
+	var openerMu sync.Mutex
+	openCount := 0
+	sio := &SerialIO{
+		mixr:                mixr,
+		logger:              zap.NewNop().Sugar(),
+		connectionState:     SerialDisconnected,
+		lastIndicatorStates: make(map[string]bool),
+		reconnectDelay:      5 * time.Millisecond,
+	}
+	sio.openPort = func(serial.OpenOptions) (io.ReadWriteCloser, error) {
+		openerMu.Lock()
+		defer openerMu.Unlock()
+		openCount++
+		if openCount == 1 {
+			return nil, errors.New("device not present")
+		}
+		return connected, nil
+	}
+	states := sio.SubscribeToConnectionStatus()
+
+	if err := sio.Start(); err == nil {
+		t.Fatal("initial Start succeeded unexpectedly")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		sio.stateMu.RLock()
+		isConnected := sio.connected
+		generation := sio.connectionGeneration
+		sio.stateMu.RUnlock()
+		if isConnected && generation == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("initial-open retry did not connect")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := <-states; got != SerialConnected {
+		// The buffered subscription intentionally collapses intermediate states.
+		t.Fatalf("latest connection state = %q, want connected", got)
+	}
+	sio.Stop()
+	openerMu.Lock()
+	gotOpenCount := openCount
+	openerMu.Unlock()
+	if gotOpenCount != 2 {
+		t.Fatalf("open count = %d, want failed initial attempt + successful retry", gotOpenCount)
 	}
 }
 
