@@ -15,18 +15,23 @@ boundaries; avoid services, installers, and heavy frameworks without a new
 decision. **Limitations.** The module and application package now use mixr
 identity, while Linux heritage exists even though VFinal targets Windows.
 
-## D-002 — Relative encoders for channel volume (Planned)
+## D-002 — Relative encoders and absolute volume presets (Planned)
 
-**Decision.** VFinal channel volume controls use relative rotary encoders.
+**Decision.** VFinal channel volume controls use relative rotary encoders. Each
+encoder pushbutton sets that channel to a configurable percentage preset with a
+global fallback, independently of the separate mute button.
 
 **Rationale.** Relative input can follow host-side state without a physical
 absolute-position conflict. **Consequences.** Firmware must report direction and
 steps, and the host owns the resulting volume value. The Track B1 software
 foundation reads each matching session's actual volume for every movement,
 applies a configurable increment, and clamps the result; see
-[relative volume and mute](RELATIVE_VOLUME_MUTE.md). **Limitations.** Resolution,
-acceleration, and encoder part are unresolved; the four-pot path remains a
-compatibility requirement, and no encoder serial messages exist yet.
+[relative volume and mute](RELATIVE_VOLUME_MUTE.md). Presets use the existing
+absolute-volume command, clamp to 0–100%, and leave mute unchanged; see the
+[encoder command proposal](ENCODER_COMMAND_ARCHITECTURE.md). **Limitations.**
+Resolution, acceleration, encoder part, event schema, and preset configuration
+keys are unresolved; the four-pot path remains a compatibility requirement,
+and no encoder serial messages exist yet.
 
 ## D-003 — Momentary mute with software indicators (Planned)
 

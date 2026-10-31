@@ -97,6 +97,21 @@ endpoint selection, routing, mute, callbacks, or hardware behavior also require
 physical Windows/Nano validation. Record the hardware, Windows/build version,
 architecture, procedure, observed result, and any untested cases.
 
+## Operational diagnostics
+
+- Keep routine polling and valid ADC frames quiet. Repeated unavailable-device
+  or target warnings must be rate-limited and should log a recovery transition.
+- Serial/tray status delivery must be buffered or non-blocking so diagnostics
+  and UI work cannot stall the control path.
+- Do not log raw serial payloads by default. For malformed input, prefer bounded
+  counts, sizes, and expected framing unless verbose troubleshooting explicitly
+  requires content.
+- Preserve `logs/mixr-latest-run.log` and the five-run release-log retention
+  convention. Crash logs are separate evidence and must not be pruned by normal
+  run-log retention.
+- Use [the C2 manual checklist](docs/RELIABILITY_DIAGNOSTICS.md) for changes to
+  startup, reconnect, tray, configuration validation, or log behavior.
+
 Prefer modular, testable Go with narrow interfaces, minimal dependencies, and
 incremental changes. Clearly label verified results, assumptions, and planned
 behavior in code review and documentation.
