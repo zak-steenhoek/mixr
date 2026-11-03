@@ -45,8 +45,10 @@ than a one-way switch. For a multi-session application, state is `all-muted`,
 mutes every session. Track B1 reads actual state and uses audited 32-bit Windows
 `BOOL` bindings; see [relative volume and mute](RELATIVE_VOLUME_MUTE.md).
 **Limitations.** Indicator technology and asynchronous external-change
-notification details are unresolved, and no button/indicator protocol exists
-yet.
+notification details remain unresolved for VFinal. Track D0 implements an
+experimental five-channel analog prototype using additive `mixr:v1` momentary
+button events and polling-based indicator readback; this is not yet the final
+six-channel protocol or physically validated production behavior.
 
 ## D-004 — Default-endpoint master (Accepted)
 
@@ -94,7 +96,10 @@ hardware-to-host input.
 **Rationale.** Encoder, mute-indicator, and display state require host feedback.
 **Consequences.** The protocol needs framing, versioning, validation, and safe
 recovery from partial/unknown messages. **Limitations.** The message schema is
-unresolved, and original deej frames must continue to work.
+unresolved for VFinal, and original deej frames must continue to work. The
+experimental `mixr:v1` handshake, input events, and indicator-state messages
+used by the analog prototypes are additive compatibility evidence, not a final
+protocol selection.
 
 ## D-009 — Audited Windows COM compatibility layer (Accepted)
 
