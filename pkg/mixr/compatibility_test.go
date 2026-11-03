@@ -2,6 +2,7 @@ package mixr
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -121,11 +122,76 @@ func TestExistingConfigurationValuesPopulateUnchanged(t *testing.T) {
 	}
 }
 
+func TestInvalidConfigurationFallsBackWithActionableWarnings(t *testing.T) {
+	config, err := NewConfig(zap.NewNop().Sugar(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.userConfig.Set(configKeySliderMapping, map[string][]string{
+		"bad": {"chrome.exe"},
+		"0":   {"master"},
+		"1":   {"master", ""},
+	})
+	config.userConfig.Set(configKeyCOMPort, " ")
+	config.userConfig.Set(configKeyBaudRate, -1)
+	config.userConfig.Set(configKeyNoiseReductionLevel, "extreme")
+	config.userConfig.Set(configKeyHardwareMuteTarget, "")
+	config.userConfig.Set(configKeyHardwareMutePollMS, 1)
+	config.userConfig.Set(configKeyMicrophoneLevelDeadband, 1024)
+
+	if err := config.populateFromVipers(); err != nil {
+		t.Fatal(err)
+	}
+	if config.ConnectionInfo.COMPort != defaultCOMPort || config.ConnectionInfo.BaudRate != defaultBaudRate {
+		t.Fatalf("connection fallback = %#v", config.ConnectionInfo)
+	}
+	if config.NoiseReductionLevel != defaultNoiseReductionLevel {
+		t.Fatalf("noise reduction = %q", config.NoiseReductionLevel)
+	}
+	if config.HardwareMutePrototype.Target != defaultHardwareMuteTarget ||
+		config.HardwareMutePrototype.PollInterval != defaultHardwareMutePollMS*time.Millisecond ||
+		config.HardwareMutePrototype.MicrophoneLevelDeadband != defaultMicrophoneLevelDeadband {
+		t.Fatalf("hardware fallback = %#v", config.HardwareMutePrototype)
+	}
+	if _, present := config.SliderMapping.get(0); !present {
+		t.Fatal("valid slider mapping was discarded")
+	}
+	if len(config.ValidationWarnings) < 7 {
+		t.Fatalf("validation warning count = %d, want at least 7: %q", len(config.ValidationWarnings), config.ValidationWarnings)
+	}
+}
+
 func TestValidatedSerialProtocolIdentity(t *testing.T) {
 	if prototypeProtocolPrefix != "mixr:v1:" {
 		t.Fatalf("protocol prefix = %q, want mixr:v1:", prototypeProtocolPrefix)
 	}
 	if prototypeHelloMessage != "mixr:v1:hello" {
 		t.Fatalf("hello message = %q", prototypeHelloMessage)
+	}
+}
+
+func TestValidatedRepositoryConfigLoads(t *testing.T) {
+	originalDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repositoryRoot := filepath.Clean(filepath.Join(originalDirectory, "..", ".."))
+	if err := os.Chdir(repositoryRoot); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(originalDirectory) })
+
+	config, err := NewConfig(zap.NewNop().Sugar(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Load(); err != nil {
+		t.Fatalf("validated config.yaml did not load: %v", err)
+	}
+	if config.ConnectionInfo.COMPort != "COM4" || config.ConnectionInfo.BaudRate != 9600 {
+		t.Fatalf("validated serial config changed: %#v", config.ConnectionInfo)
+	}
+	if targets, ok := config.SliderMapping.get(3); !ok || len(targets) != 1 || targets[0] != "deej.current" {
+		t.Fatalf("validated foreground mapping changed: %q present=%t", targets, ok)
 	}
 }

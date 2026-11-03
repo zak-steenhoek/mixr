@@ -8,6 +8,7 @@ import (
 )
 
 const prototypeSessionRefreshCooldown = 5 * time.Second
+const prototypeWarningInterval = 30 * time.Second
 
 type prototypeIndicatorWriter interface {
 	setPrototypeIndicator(controlID string, on bool) error
@@ -36,6 +37,7 @@ type hardwareMutePrototype struct {
 	microphoneLevelDeadband int
 	hasLastMicrophoneLevel  bool
 	lastMicrophoneADC       int
+	warnings                *diagnosticLimiter
 
 	mu        sync.Mutex
 	ready     bool
@@ -63,6 +65,7 @@ func newHardwareMutePrototype(mixr *Mixr, logger *zap.SugaredLogger) *hardwareMu
 		verbose:                 mixr.Verbose(),
 		microphoneLevelInverted: mixr.config.HardwareMutePrototype.MicrophoneLevelInverted,
 		microphoneLevelDeadband: mixr.config.HardwareMutePrototype.MicrophoneLevelDeadband,
+		warnings:                newDiagnosticLimiter(prototypeWarningInterval),
 		stop:                    make(chan struct{}),
 		done:                    make(chan struct{}),
 	}
@@ -163,8 +166,13 @@ func (p *hardwareMutePrototype) applyMicrophoneLevelLocked(adc int) {
 	command := AudioCommand{Target: control.target, Operation: AudioCommandSetVolume, Volume: level}
 	result, err := p.executeCommandWithRefreshLocked(control, command, false)
 	if err != nil {
-		p.logger.Warnw("Microphone level update failed", "adc", adc, "level", level, "error", err)
+		if p.warnings.allow("microphone-level", time.Now()) {
+			p.logger.Warnw("Microphone level target is unavailable; updates will resume after recovery", "adc", adc, "level", level, "error", err)
+		}
 		return
+	}
+	if p.warnings.recovered("microphone-level") {
+		p.logger.Info("Microphone level target recovered")
 	}
 	p.hasLastMicrophoneLevel = true
 	p.lastMicrophoneADC = adc
@@ -213,14 +221,20 @@ func (p *hardwareMutePrototype) syncIndicatorsLocked(forceRefresh bool) {
 func (p *hardwareMutePrototype) syncIndicatorLocked(controlID string, control *prototypeMuteControl, forceRefresh bool) {
 	result, err := p.executeWithRefreshLocked(control, AudioCommandCurrentMute, forceRefresh)
 	if err != nil {
-		p.logger.Warnw("Mute readback failed; setting indicator off until state is observable",
-			"control", controlID,
-			"target", control.target,
-			"error", err)
+		warningKey := "mute-readback:" + controlID
+		if p.warnings.allow(warningKey, time.Now()) {
+			p.logger.Warnw("Mute target is unavailable; setting indicator off until state is observable",
+				"control", controlID,
+				"target", control.target,
+				"error", err)
+		}
 		if indicatorErr := p.indicator.setPrototypeIndicator(controlID, false); indicatorErr != nil {
 			p.logger.Warnw("Failed to update mute indicator", "control", controlID, "error", indicatorErr)
 		}
 		return
+	}
+	if p.warnings.recovered("mute-readback:" + controlID) {
+		p.logger.Infow("Mute target recovered", "control", controlID, "target", control.target)
 	}
 	if p.verbose {
 		p.logger.Debugw("Mute state readback",

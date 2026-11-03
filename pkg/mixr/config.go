@@ -2,7 +2,9 @@ package mixr
 
 import (
 	"fmt"
-	"path"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +28,8 @@ type CanonicalConfig struct {
 	InvertSliders bool
 
 	NoiseReductionLevel string
+	LoadedFilePath      string
+	ValidationWarnings  []string
 
 	HardwareMutePrototype struct {
 		Enabled                 bool
@@ -69,14 +73,15 @@ const (
 
 	defaultCOMPort                 = "COM4"
 	defaultBaudRate                = 9600
+	defaultNoiseReductionLevel     = "default"
 	defaultHardwareMuteTarget      = "spotify.exe"
 	defaultHardwareMutePollMS      = 500
 	defaultMicrophoneLevelDeadband = 12
 	minimumHardwareMutePollTime    = 100 * time.Millisecond
 )
 
-// has to be defined as a non-constant because we're using path.Join
-var internalConfigPath = path.Join(".", logDirectory)
+// has to be defined as a non-constant because we're using filepath.Join
+var internalConfigPath = filepath.Join(".", logDirectory)
 
 var defaultSliderMapping = func() *sliderMap {
 	emptyMap := newSliderMap()
@@ -106,6 +111,7 @@ func NewConfig(logger *zap.SugaredLogger, notifier Notifier) (*CanonicalConfig, 
 	userConfig.SetDefault(configKeyInvertSliders, false)
 	userConfig.SetDefault(configKeyCOMPort, defaultCOMPort)
 	userConfig.SetDefault(configKeyBaudRate, defaultBaudRate)
+	userConfig.SetDefault(configKeyNoiseReductionLevel, defaultNoiseReductionLevel)
 	userConfig.SetDefault(configKeyHardwareMuteEnabled, false)
 	userConfig.SetDefault(configKeyHardwareMuteTarget, defaultHardwareMuteTarget)
 	userConfig.SetDefault(configKeyHardwareMutePollMS, defaultHardwareMutePollMS)
@@ -152,6 +158,11 @@ func (cc *CanonicalConfig) Load() error {
 
 		return fmt.Errorf("read user config: %w", err)
 	}
+	loadedPath := cc.userConfig.ConfigFileUsed()
+	if absolutePath, err := filepath.Abs(loadedPath); err == nil {
+		loadedPath = absolutePath
+	}
+	cc.LoadedFilePath = loadedPath
 
 	// load the internal config - this doesn't have to exist, so it can error
 	if err := cc.internalConfig.ReadInConfig(); err != nil {
@@ -164,12 +175,15 @@ func (cc *CanonicalConfig) Load() error {
 		return fmt.Errorf("populate config fields: %w", err)
 	}
 
-	cc.logger.Info("Loaded config successfully")
-	cc.logger.Infow("Config values",
-		"sliderMapping", cc.SliderMapping,
-		"connectionInfo", cc.ConnectionInfo,
-		"invertSliders", cc.InvertSliders,
-		"hardwareMutePrototype", cc.HardwareMutePrototype)
+	cc.logger.Infow("Loaded configuration",
+		"path", cc.LoadedFilePath,
+		"serialPort", cc.ConnectionInfo.COMPort,
+		"baudRate", cc.ConnectionInfo.BaudRate,
+		"analogMappings", cc.SliderMapping,
+		"hardwareControlsEnabled", cc.HardwareMutePrototype.Enabled)
+	for _, warning := range cc.ValidationWarnings {
+		cc.logger.Warnw("Configuration warning", "path", cc.LoadedFilePath, "detail", warning)
+	}
 
 	return nil
 }
@@ -239,50 +253,56 @@ func (cc *CanonicalConfig) StopWatchingConfigFile() {
 }
 
 func (cc *CanonicalConfig) populateFromVipers() error {
+	cc.ValidationWarnings = nil
+	userMappings := cc.userConfig.GetStringMapStringSlice(configKeySliderMapping)
+	internalMappings := cc.internalConfig.GetStringMapStringSlice(configKeySliderMapping)
+	cc.validateMappings(userMappings)
 
 	// merge the slider mappings from the user and internal configs
 	cc.SliderMapping = sliderMapFromConfigs(
-		cc.userConfig.GetStringMapStringSlice(configKeySliderMapping),
-		cc.internalConfig.GetStringMapStringSlice(configKeySliderMapping),
+		userMappings,
+		internalMappings,
 	)
 
 	// get the rest of the config fields - viper saves us a lot of effort here
-	cc.ConnectionInfo.COMPort = cc.userConfig.GetString(configKeyCOMPort)
+	cc.ConnectionInfo.COMPort = strings.TrimSpace(cc.userConfig.GetString(configKeyCOMPort))
+	if cc.ConnectionInfo.COMPort == "" {
+		cc.addValidationWarning(fmt.Sprintf("%s is empty; using %s", configKeyCOMPort, defaultCOMPort))
+		cc.ConnectionInfo.COMPort = defaultCOMPort
+	}
 
 	cc.ConnectionInfo.BaudRate = cc.userConfig.GetInt(configKeyBaudRate)
 	if cc.ConnectionInfo.BaudRate <= 0 {
-		cc.logger.Warnw("Invalid baud rate specified, using default value",
-			"key", configKeyBaudRate,
-			"invalidValue", cc.ConnectionInfo.BaudRate,
-			"defaultValue", defaultBaudRate)
-
+		cc.addValidationWarning(fmt.Sprintf("%s must be positive (got %d); using %d", configKeyBaudRate, cc.ConnectionInfo.BaudRate, defaultBaudRate))
 		cc.ConnectionInfo.BaudRate = defaultBaudRate
 	}
 
 	cc.InvertSliders = cc.userConfig.GetBool(configKeyInvertSliders)
-	cc.NoiseReductionLevel = cc.userConfig.GetString(configKeyNoiseReductionLevel)
+	cc.NoiseReductionLevel = strings.ToLower(strings.TrimSpace(cc.userConfig.GetString(configKeyNoiseReductionLevel)))
+	if cc.NoiseReductionLevel != "low" && cc.NoiseReductionLevel != "default" && cc.NoiseReductionLevel != "high" {
+		cc.addValidationWarning(fmt.Sprintf("%s must be low, default, or high (got %q); using %q", configKeyNoiseReductionLevel, cc.NoiseReductionLevel, defaultNoiseReductionLevel))
+		cc.NoiseReductionLevel = defaultNoiseReductionLevel
+	}
 
 	cc.HardwareMutePrototype.Enabled = cc.userConfig.GetBool(configKeyHardwareMuteEnabled)
 	cc.HardwareMutePrototype.Target = strings.ToLower(strings.TrimSpace(cc.userConfig.GetString(configKeyHardwareMuteTarget)))
 	if cc.HardwareMutePrototype.Target == "" {
+		cc.addValidationWarning(fmt.Sprintf("%s is empty; using %q", configKeyHardwareMuteTarget, defaultHardwareMuteTarget))
 		cc.HardwareMutePrototype.Target = defaultHardwareMuteTarget
 	}
 	pollInterval := time.Duration(cc.userConfig.GetInt(configKeyHardwareMutePollMS)) * time.Millisecond
 	if pollInterval < minimumHardwareMutePollTime {
-		cc.logger.Warnw("Invalid hardware mute poll interval, using default value",
-			"key", configKeyHardwareMutePollMS,
-			"invalidValue", pollInterval,
-			"defaultValue", defaultHardwareMutePollMS*time.Millisecond)
+		cc.addValidationWarning(fmt.Sprintf("%s must be at least %d (got %d); using %d",
+			configKeyHardwareMutePollMS, minimumHardwareMutePollTime/time.Millisecond,
+			pollInterval/time.Millisecond, defaultHardwareMutePollMS))
 		pollInterval = defaultHardwareMutePollMS * time.Millisecond
 	}
 	cc.HardwareMutePrototype.PollInterval = pollInterval
 	cc.HardwareMutePrototype.MicrophoneLevelInverted = cc.userConfig.GetBool(configKeyMicrophoneLevelInverted)
 	deadband := cc.userConfig.GetInt(configKeyMicrophoneLevelDeadband)
 	if deadband < 0 || deadband > 128 {
-		cc.logger.Warnw("Invalid microphone level deadband, using default value",
-			"key", configKeyMicrophoneLevelDeadband,
-			"invalidValue", deadband,
-			"defaultValue", defaultMicrophoneLevelDeadband)
+		cc.addValidationWarning(fmt.Sprintf("%s must be between 0 and 128 ADC counts (got %d); using %d",
+			configKeyMicrophoneLevelDeadband, deadband, defaultMicrophoneLevelDeadband))
 		deadband = defaultMicrophoneLevelDeadband
 	}
 	cc.HardwareMutePrototype.MicrophoneLevelDeadband = deadband
@@ -290,6 +310,45 @@ func (cc *CanonicalConfig) populateFromVipers() error {
 	cc.logger.Debug("Populated config fields from vipers")
 
 	return nil
+}
+
+func (cc *CanonicalConfig) addValidationWarning(message string) {
+	cc.ValidationWarnings = append(cc.ValidationWarnings, message)
+}
+
+func (cc *CanonicalConfig) validateMappings(mappings map[string][]string) {
+	indexes := make([]string, 0, len(mappings))
+	for index := range mappings {
+		indexes = append(indexes, index)
+	}
+	sort.Strings(indexes)
+	targetOwners := make(map[string]string)
+	for _, index := range indexes {
+		numericIndex, err := strconv.Atoi(index)
+		if err != nil || numericIndex < 0 {
+			cc.addValidationWarning(fmt.Sprintf("%s key %q is not a non-negative slider index and will be ignored", configKeySliderMapping, index))
+			continue
+		}
+		targets := mappings[index]
+		if len(targets) == 0 {
+			cc.addValidationWarning(fmt.Sprintf("%s.%s has no targets and will not control audio", configKeySliderMapping, index))
+		}
+		for _, rawTarget := range targets {
+			target := strings.ToLower(strings.TrimSpace(rawTarget))
+			if target == "" {
+				cc.addValidationWarning(fmt.Sprintf("%s.%s contains an empty target, which will be ignored", configKeySliderMapping, index))
+				continue
+			}
+			if strings.ContainsAny(target, "\r\n\x00") {
+				cc.addValidationWarning(fmt.Sprintf("%s.%s target %q contains control characters and will not match an audio target", configKeySliderMapping, index, rawTarget))
+			}
+			if owner, duplicate := targetOwners[target]; duplicate && owner != index {
+				cc.addValidationWarning(fmt.Sprintf("target %q is mapped to both slider %s and slider %s; either control can overwrite the other", target, owner, index))
+			} else {
+				targetOwners[target] = index
+			}
+		}
+	}
 }
 
 func (cc *CanonicalConfig) onConfigReloaded() {

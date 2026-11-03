@@ -244,6 +244,7 @@ func testHardwareMutePrototype(commander AudioCommander, indicator prototypeIndi
 		},
 		poll:                    500 * time.Millisecond,
 		microphoneLevelDeadband: 12,
+		warnings:                newDiagnosticLimiter(prototypeWarningInterval),
 	}
 }
 
