@@ -110,6 +110,24 @@ grow its current log without a byte cap.
 
 ## Manual physical regression checklist
 
+### Current status (2026-11-02)
+
+The original prototype breadboard used for the validated three-mute and
+microphone-control firmware has been disassembled. A replacement five-channel
+board has passed a standalone electrical diagnostic: A0–A4 correspond to their
+intended analog controls, momentary buttons are connected on D2/D4/D6/D8/D10,
+and LEDs are connected on D3/D5/D7/D9/D11.
+
+That result validates the replacement board's tested wiring only. The current
+production firmware does not support the five-channel momentary-button layout,
+so the diagnostic does not validate C2 serial recovery, switch baselining,
+Windows mute behavior, indicator synchronization, tray behavior, or combined
+software/hardware operation. The complete C2 physical regression below has not
+been performed and must not be inferred from the electrical diagnostic. This is
+an explicit validation limitation, not a C2 software test failure.
+
+### Outstanding C2 checklist
+
 Record commit, executable architecture, Windows build, Nano R4/Arduino core,
 COM port, baud, audio endpoints, application versions, procedure, observed
 result, and every untested case.
@@ -148,6 +166,10 @@ On 2026-10-30, both `GOARCH=386` and `GOARCH=amd64` passed:
 - the Windows development and release build scripts; and
 - builds of the routing-spike, audio-control, and microphone-control
   diagnostics.
+
+The same full test and build matrix passed again on 2026-11-02 before C2
+integration. This repeat is automated software/build evidence and does not
+change the physical-validation limitation recorded above.
 
 The validated repository `config.yaml` is loaded by a focused compatibility
 test. Additional tests cover semantic fallbacks/warnings, malformed and
