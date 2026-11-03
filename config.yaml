@@ -26,6 +26,9 @@ noise_reduction: default
 hardware_mute_prototype:
   enabled: true
   target: spotify.exe
+  five_channel_momentary: true
+  chrome_target: chrome.exe
+  foreground_target: deej.current
   poll_interval_ms: 500
   microphone_level_inverted: false
   microphone_level_deadband: 12

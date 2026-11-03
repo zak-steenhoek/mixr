@@ -41,6 +41,9 @@ func TestLegacyConfigurationContract(t *testing.T) {
 		"noise reduction":             configKeyNoiseReductionLevel,
 		"hardware mute enabled":       configKeyHardwareMuteEnabled,
 		"hardware mute target":        configKeyHardwareMuteTarget,
+		"five-channel momentary":      configKeyFiveChannelMomentary,
+		"Chrome mute target":          configKeyChromeMuteTarget,
+		"foreground mute target":      configKeyForegroundMuteTarget,
 		"hardware mute poll interval": configKeyHardwareMutePollMS,
 		"microphone inversion":        configKeyMicrophoneLevelInverted,
 		"microphone deadband":         configKeyMicrophoneLevelDeadband,
@@ -53,6 +56,9 @@ func TestLegacyConfigurationContract(t *testing.T) {
 		"noise reduction":             "noise_reduction",
 		"hardware mute enabled":       "hardware_mute_prototype.enabled",
 		"hardware mute target":        "hardware_mute_prototype.target",
+		"five-channel momentary":      "hardware_mute_prototype.five_channel_momentary",
+		"Chrome mute target":          "hardware_mute_prototype.chrome_target",
+		"foreground mute target":      "hardware_mute_prototype.foreground_target",
 		"hardware mute poll interval": "hardware_mute_prototype.poll_interval_ms",
 		"microphone inversion":        "hardware_mute_prototype.microphone_level_inverted",
 		"microphone deadband":         "hardware_mute_prototype.microphone_level_deadband",
@@ -101,6 +107,9 @@ func TestExistingConfigurationValuesPopulateUnchanged(t *testing.T) {
 	config.userConfig.Set(configKeyNoiseReductionLevel, "default")
 	config.userConfig.Set(configKeyHardwareMuteEnabled, true)
 	config.userConfig.Set(configKeyHardwareMuteTarget, "spotify.exe")
+	config.userConfig.Set(configKeyFiveChannelMomentary, true)
+	config.userConfig.Set(configKeyChromeMuteTarget, "chrome.exe")
+	config.userConfig.Set(configKeyForegroundMuteTarget, "deej.current")
 	config.userConfig.Set(configKeyHardwareMutePollMS, 500)
 	config.userConfig.Set(configKeyMicrophoneLevelInverted, false)
 	config.userConfig.Set(configKeyMicrophoneLevelDeadband, 12)
@@ -116,6 +125,9 @@ func TestExistingConfigurationValuesPopulateUnchanged(t *testing.T) {
 	}
 	if !config.HardwareMutePrototype.Enabled || config.HardwareMutePrototype.Target != "spotify.exe" {
 		t.Fatalf("hardware mute config = %#v", config.HardwareMutePrototype)
+	}
+	if !config.HardwareMutePrototype.FiveChannelMomentary || config.HardwareMutePrototype.ChromeTarget != "chrome.exe" || config.HardwareMutePrototype.ForegroundTarget != "deej.current" {
+		t.Fatalf("five-channel config = %#v", config.HardwareMutePrototype)
 	}
 	if config.HardwareMutePrototype.PollInterval != 500*time.Millisecond || config.HardwareMutePrototype.MicrophoneLevelDeadband != 12 {
 		t.Fatalf("hardware timing config = %#v", config.HardwareMutePrototype)
@@ -136,6 +148,8 @@ func TestInvalidConfigurationFallsBackWithActionableWarnings(t *testing.T) {
 	config.userConfig.Set(configKeyBaudRate, -1)
 	config.userConfig.Set(configKeyNoiseReductionLevel, "extreme")
 	config.userConfig.Set(configKeyHardwareMuteTarget, "")
+	config.userConfig.Set(configKeyChromeMuteTarget, "")
+	config.userConfig.Set(configKeyForegroundMuteTarget, "")
 	config.userConfig.Set(configKeyHardwareMutePollMS, 1)
 	config.userConfig.Set(configKeyMicrophoneLevelDeadband, 1024)
 
@@ -149,6 +163,8 @@ func TestInvalidConfigurationFallsBackWithActionableWarnings(t *testing.T) {
 		t.Fatalf("noise reduction = %q", config.NoiseReductionLevel)
 	}
 	if config.HardwareMutePrototype.Target != defaultHardwareMuteTarget ||
+		config.HardwareMutePrototype.ChromeTarget != defaultChromeMuteTarget ||
+		config.HardwareMutePrototype.ForegroundTarget != defaultForegroundMuteTarget ||
 		config.HardwareMutePrototype.PollInterval != defaultHardwareMutePollMS*time.Millisecond ||
 		config.HardwareMutePrototype.MicrophoneLevelDeadband != defaultMicrophoneLevelDeadband {
 		t.Fatalf("hardware fallback = %#v", config.HardwareMutePrototype)
@@ -193,5 +209,8 @@ func TestValidatedRepositoryConfigLoads(t *testing.T) {
 	}
 	if targets, ok := config.SliderMapping.get(3); !ok || len(targets) != 1 || targets[0] != "deej.current" {
 		t.Fatalf("validated foreground mapping changed: %q present=%t", targets, ok)
+	}
+	if !config.HardwareMutePrototype.FiveChannelMomentary || config.HardwareMutePrototype.ChromeTarget != "chrome.exe" || config.HardwareMutePrototype.ForegroundTarget != "deej.current" {
+		t.Fatalf("validated five-channel mute config changed: %#v", config.HardwareMutePrototype)
 	}
 }
