@@ -205,23 +205,18 @@ func TestHardwareMutePrototypeRefreshesSpotifyAndChangedDefaultEndpoint(t *testi
 	indicator := &fakePrototypeIndicator{}
 	prototype := testHardwareMutePrototype(commander, indicator)
 	refreshes := 0
-	prototype.refresh = func() {
+	prototype.refresh = func(reason string) bool {
 		refreshes++
-		if refreshes == 1 {
-			// Simulate rediscovery of a newly selected default endpoint.
-			commander.unavailable[masterSessionName] = false
-		}
-		if refreshes == 2 {
-			commander.unavailable["spotify.exe"] = false
-		}
-		if refreshes == 3 {
-			commander.unavailable[inputSessionName] = false
-		}
+		// One complete discovery can recover every target in the snapshot.
+		commander.unavailable[masterSessionName] = false
+		commander.unavailable["spotify.exe"] = false
+		commander.unavailable[inputSessionName] = false
+		return true
 	}
 
 	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialReady})
-	if refreshes != 3 {
-		t.Fatalf("refresh count = %d, want one independent refresh per unavailable target", refreshes)
+	if refreshes != 1 {
+		t.Fatalf("refresh count = %d, want one global refresh for unavailable targets", refreshes)
 	}
 	if !indicator.last(prototypeSpotifyMuteControl) || !indicator.last(prototypeMasterMuteControl) || !indicator.last(prototypeMicrophoneMuteControl) {
 		t.Fatalf("indicators after rediscovery: Spotify=%t master=%t microphone=%t, want all on",
@@ -234,7 +229,7 @@ func TestHardwareMutePrototypeMissingEndpointFailsSafe(t *testing.T) {
 	commander.unavailable[masterSessionName] = true
 	indicator := &fakePrototypeIndicator{}
 	prototype := testHardwareMutePrototype(commander, indicator)
-	prototype.refresh = func() {}
+	prototype.refresh = func(reason string) bool { return true }
 
 	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialReady})
 	if indicator.last(prototypeMasterMuteControl) {
@@ -249,6 +244,49 @@ func TestHardwareMutePrototypeMissingEndpointFailsSafe(t *testing.T) {
 	}
 	if indicator.last(prototypeMasterMuteControl) {
 		t.Fatal("failed endpoint toggle left indicator on")
+	}
+}
+
+func TestHardwareMutePrototypePollingMissingTargetsDoesNotRefresh(t *testing.T) {
+	commander := newFakePrototypeCommander()
+	commander.unavailable["spotify.exe"] = true
+	commander.unavailable["chrome.exe"] = true
+	commander.unavailable["deej.current"] = true
+	prototype := testHardwareMutePrototype(commander, &fakePrototypeIndicator{})
+	prototype.ready = true
+	refreshes := 0
+	prototype.refresh = func(reason string) bool {
+		refreshes++
+		return true
+	}
+
+	for i := 0; i < 40; i++ {
+		prototype.syncIndicators(false)
+	}
+	if refreshes != 0 {
+		t.Fatalf("poll-driven refreshes = %d, want 0", refreshes)
+	}
+}
+
+func TestHardwareMutePrototypeButtonGetsOneRecoveryAttempt(t *testing.T) {
+	commander := newFakePrototypeCommander()
+	commander.unavailable["chrome.exe"] = true
+	prototype := testHardwareMutePrototype(commander, &fakePrototypeIndicator{})
+	prototype.ready = true
+	refreshes := 0
+	prototype.refresh = func(reason string) bool {
+		refreshes++
+		commander.unavailable["chrome.exe"] = false
+		return true
+	}
+
+	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: prototypeChromeMuteControl, ButtonPressed: true})
+	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: prototypeChromeMuteControl, ButtonPressed: true})
+	if refreshes != 1 {
+		t.Fatalf("button recovery refreshes = %d, want 1", refreshes)
+	}
+	if commander.toggleCount["chrome.exe"] != 1 {
+		t.Fatalf("successful toggles = %d, want 1", commander.toggleCount["chrome.exe"])
 	}
 }
 
@@ -318,7 +356,10 @@ func TestHardwareMutePrototypeReappliesLevelAfterMicrophoneRediscovery(t *testin
 	// Any full session refresh can replace the capture endpoint, even when a
 	// different target detected staleness first.
 	commander.unavailable[masterSessionName] = true
-	prototype.refresh = func() { commander.unavailable[masterSessionName] = false }
+	prototype.refresh = func(reason string) bool {
+		commander.unavailable[masterSessionName] = false
+		return true
+	}
 	prototype.syncIndicators(true)
 	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialAnalogEvent, ControlID: prototypeMicrophoneLevelControl, AnalogValue: 512})
 	if commander.volumeWrites[inputSessionName] != 2 {

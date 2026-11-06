@@ -18,7 +18,7 @@ func TestFiveChannelFirmwareContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read five-channel firmware: %v", err)
 	}
-	sketch := string(contents)
+	sketch := strings.ReplaceAll(string(contents), "\r\n", "\n")
 
 	required := []string{
 		"const int analogInputs[NUM_SLIDERS] = {A0, A1, A2, A3};",
