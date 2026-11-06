@@ -13,6 +13,13 @@ channel wiring. The integrated firmware and host behavior in this report remain
 ready for, but not passed by, physical validation until the user records the
 checklist results below.
 
+The repeatable 15:31-15:57 release-build termination found after this report is
+addressed on the isolated D0 fix branch. Its evidence, refresh coordination,
+dedicated COM-owner design, automated results, and outstanding 60-minute soak
+are recorded in [Track D0 runtime stability](D0_RUNTIME_STABILITY.md). This
+document's original automated and physical-validation claims remain scoped to
+the commit and date stated below.
+
 ## Audit and compatibility decision
 
 The earlier host accepts latching-switch messages in this form:
@@ -231,8 +238,10 @@ passed only from direct observation.
 - Polling observes external changes rather than registering per-session mute
   callbacks, so indication latency is bounded by the configured poll interval.
 - Foreground resolution has the documented process-ownership limitations above.
-- Application session creation is subject to the existing five-second refresh
-  cooldown; stale session snapshots can briefly show unavailable.
+- On the D0 stability-fix branch, application session creation is subject to a
+  global refresh budget and the ordinary 45-second freshness path; stale
+  snapshots can briefly show unavailable without causing per-control refresh
+  amplification. See [Track D0 runtime stability](D0_RUNTIME_STABILITY.md).
 - Arduino compilation is environment-dependent and must be recorded separately
   if Arduino CLI and the installed Nano R4 core are unavailable here.
 - The experimental five-channel interface is not the final six-encoder VFinal

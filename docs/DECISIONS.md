@@ -108,8 +108,11 @@ legacy dependency methods.
 
 **Rationale.** The audit found pointer-width, `HRESULT`, `BOOL`, output-width,
 callback, and lifetime defects. **Consequences.** New COM calls require explicit
-ABI review and tests on 386 and amd64. **Limitations.** The layer covers audited
-call paths, not every method in the pinned dependency; see
+ABI review and tests on 386 and amd64. The isolated D0 stability fix places
+discovery, retained session operations, release, and apartment shutdown on one
+dedicated OS-thread owner; see
+[Track D0 runtime stability](D0_RUNTIME_STABILITY.md). **Limitations.** The
+layer covers audited call paths, not every method in the pinned dependency; see
 [WINDOWS_AUDIO_HARDENING.md](WINDOWS_AUDIO_HARDENING.md).
 
 ## D-010 — Original deej protocol compatibility (Accepted)
