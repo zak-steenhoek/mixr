@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const prototypeSessionRefreshCooldown = 5 * time.Second
 const prototypeWarningInterval = 30 * time.Second
 
 type prototypeIndicatorWriter interface {
@@ -15,12 +14,11 @@ type prototypeIndicatorWriter interface {
 }
 
 type prototypeMuteControl struct {
-	target             string
-	hasLastSwitch      bool
-	lastSwitchClosed   bool
-	hasLastButton      bool
-	lastButtonPressed  bool
-	lastSessionRefresh time.Time
+	target            string
+	hasLastSwitch     bool
+	lastSwitchClosed  bool
+	hasLastButton     bool
+	lastButtonPressed bool
 }
 
 // hardwareMutePrototype is intentionally narrow and disposable. It supports
@@ -32,7 +30,7 @@ type hardwareMutePrototype struct {
 	commander               AudioCommander
 	indicator               prototypeIndicatorWriter
 	events                  <-chan PrototypeSerialEvent
-	refresh                 func()
+	refresh                 func(reason string) bool
 	controls                map[string]*prototypeMuteControl
 	controlOrder            []string
 	poll                    time.Duration
@@ -74,8 +72,8 @@ func newHardwareMutePrototype(mixr *Mixr, logger *zap.SugaredLogger) *hardwareMu
 		commander: mixr,
 		indicator: mixr.serial,
 		events:    mixr.serial.SubscribeToPrototypeEvents(),
-		refresh: func() {
-			mixr.sessions.refreshSessions(true)
+		refresh: func(reason string) bool {
+			return mixr.sessions.refreshSessionsWithReason(false, reason)
 		},
 		controls:                controls,
 		controlOrder:            controlOrder,
@@ -294,23 +292,21 @@ func (p *hardwareMutePrototype) executeWithRefreshLocked(control *prototypeMuteC
 	return p.executeCommandWithRefreshLocked(control, command, forceRefresh)
 }
 
-func (p *hardwareMutePrototype) executeCommandWithRefreshLocked(control *prototypeMuteControl, command AudioCommand, forceRefresh bool) (AudioCommandResult, error) {
+func (p *hardwareMutePrototype) executeCommandWithRefreshLocked(control *prototypeMuteControl, command AudioCommand, allowRecoveryRefresh bool) (AudioCommandResult, error) {
 	result, err := p.commander.ExecuteAudioCommand(command)
-	if err == nil || p.refresh == nil {
+	if err == nil || p.refresh == nil || !allowRecoveryRefresh {
 		return result, err
 	}
 
-	now := time.Now()
-	if !forceRefresh && control.lastSessionRefresh.Add(prototypeSessionRefreshCooldown).After(now) {
-		return result, err
-	}
-	p.logger.Debugw("Refreshing sessions after audio command failure", "target", control.target, "operation", command.Operation, "error", err)
-	control.lastSessionRefresh = now
+	reason := "explicit-button-target-unavailable"
+	p.logger.Debugw("Requesting bounded recovery refresh after explicit audio command failure",
+		"reason", reason, "target", control.target, "operation", command.Operation, "error", err)
 	// Every refresh replaces the complete session snapshot and may therefore
 	// select a different capture endpoint even when another target triggered
 	// it. The next firmware heartbeat must reapply the absolute A4 position.
-	p.hasLastMicrophoneLevel = false
-	p.refresh()
+	if p.refresh(reason) {
+		p.hasLastMicrophoneLevel = false
+	}
 	return p.commander.ExecuteAudioCommand(command)
 }
 

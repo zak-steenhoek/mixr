@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	ole "github.com/go-ole/go-ole"
 	ps "github.com/mitchellh/go-ps"
@@ -34,7 +35,7 @@ type masterSession struct {
 
 	eventCtx *ole.GUID
 
-	stale bool // when set to true, we should refresh sessions on the next call to SetVolume
+	stale atomic.Bool // set by the endpoint callback and read by the COM owner thread
 }
 
 func newWCASession(
@@ -203,7 +204,7 @@ func (s *masterSession) GetVolume() float32 {
 }
 
 func (s *masterSession) CurrentVolume() (float32, error) {
-	if s.stale {
+	if s.stale.Load() {
 		return 0, errRefreshSessions
 	}
 
@@ -215,7 +216,7 @@ func (s *masterSession) CurrentVolume() (float32, error) {
 }
 
 func (s *masterSession) SetVolume(v float32) error {
-	if s.stale {
+	if s.stale.Load() {
 		s.logger.Warnw("Session expired because default device has changed, triggering session refresh")
 		return errRefreshSessions
 	}
@@ -234,7 +235,7 @@ func (s *masterSession) SetVolume(v float32) error {
 }
 
 func (s *masterSession) CurrentMute() (bool, error) {
-	if s.stale {
+	if s.stale.Load() {
 		return false, errRefreshSessions
 	}
 
@@ -246,7 +247,7 @@ func (s *masterSession) CurrentMute() (bool, error) {
 }
 
 func (s *masterSession) SetMute(muted bool) error {
-	if s.stale {
+	if s.stale.Load() {
 		return errRefreshSessions
 	}
 
@@ -269,5 +270,5 @@ func (s *masterSession) String() string {
 }
 
 func (s *masterSession) markAsStale() {
-	s.stale = true
+	s.stale.Store(true)
 }

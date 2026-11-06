@@ -1,6 +1,7 @@
 package mixr
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -17,6 +18,13 @@ type sessionMap struct {
 
 	m    map[string][]Session
 	lock sync.Locker
+
+	refreshMu         sync.Mutex
+	refreshStateMu    sync.Mutex
+	refreshRequests   uint64
+	refreshInProgress bool
+	refreshDone       chan struct{}
+	released          bool
 
 	sessionFinder SessionFinder
 
@@ -73,10 +81,11 @@ func newSessionMap(mixr *Mixr, logger *zap.SugaredLogger, sessionFinder SessionF
 }
 
 func (m *sessionMap) initialize() error {
-	if err := m.getAndAddSessions(); err != nil {
+	if err := m.refreshSessionSnapshot("startup"); err != nil {
 		m.logger.Warnw("Failed to get all sessions during session map initialization", "error", err)
 		return fmt.Errorf("get all sessions during init: %w", err)
 	}
+	m.finishRefresh(time.Now())
 
 	m.setupOnConfigReload()
 	m.setupOnSliderMove()
@@ -85,6 +94,19 @@ func (m *sessionMap) initialize() error {
 }
 
 func (m *sessionMap) release() error {
+	m.refreshStateMu.Lock()
+	m.released = true
+	m.refreshStateMu.Unlock()
+	m.refreshMu.Lock()
+	defer m.refreshMu.Unlock()
+	m.lock.Lock()
+	for _, sessions := range m.m {
+		releaseSessions(sessions)
+	}
+	m.m = make(map[string][]Session)
+	m.unmappedSessions = nil
+	m.lock.Unlock()
+
 	if err := m.sessionFinder.Release(); err != nil {
 		m.logger.Warnw("Failed to release session finder during session map release", "error", err)
 		return fmt.Errorf("release session finder during release: %w", err)
@@ -93,30 +115,34 @@ func (m *sessionMap) release() error {
 	return nil
 }
 
-// assumes the session map is clean!
-// only call on a new session map or as part of refreshSessions which calls reset
-func (m *sessionMap) getAndAddSessions() error {
-
-	// mark that we're refreshing before anything else
-	m.lastSessionRefresh = time.Now()
-	m.unmappedSessions = nil
-
+// refreshSessionSnapshot discovers and installs one complete snapshot while
+// commands are excluded. Old sessions remain usable if discovery fails.
+func (m *sessionMap) refreshSessionSnapshot(reason string) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	sessions, err := m.sessionFinder.GetAllSessions()
 	if err != nil {
 		m.logger.Warnw("Failed to get sessions from session finder", "error", err)
 		return fmt.Errorf("get sessions from SessionFinder: %w", err)
 	}
 
+	next := make(map[string][]Session)
+	unmapped := make([]Session, 0)
 	for _, session := range sessions {
-		m.add(session)
-
+		key := session.Key()
+		next[key] = append(next[key], session)
 		if !m.sessionMapped(session) {
 			m.logger.Debugw("Tracking unmapped session", "session", session)
-			m.unmappedSessions = append(m.unmappedSessions, session)
+			unmapped = append(unmapped, session)
 		}
 	}
 
-	m.logger.Infow("Got all audio sessions successfully", "sessionMap", m)
+	for _, oldSessions := range m.m {
+		releaseSessions(oldSessions)
+	}
+	m.m = next
+	m.unmappedSessions = unmapped
+	m.logger.Infow("Got all audio sessions successfully", "reason", reason, "sessionCount", len(sessions))
 
 	return nil
 }
@@ -129,7 +155,7 @@ func (m *sessionMap) setupOnConfigReload() {
 			select {
 			case <-configReloadedChannel:
 				m.logger.Info("Detected config reload, attempting to re-acquire all audio sessions")
-				m.refreshSessions(false)
+				m.refreshSessionsWithReason(false, "configuration-reload")
 			}
 		}
 	}()
@@ -150,20 +176,72 @@ func (m *sessionMap) setupOnSliderMove() {
 
 // performance: explain why force == true at every such use to avoid unintended forced refresh spams
 func (m *sessionMap) refreshSessions(force bool) {
+	m.refreshSessionsWithReason(force, "unspecified")
+}
 
-	// make sure enough time passed since the last refresh, unless force is true in which case always clear
-	if !force && m.lastSessionRefresh.Add(minTimeBetweenSessionRefreshes).After(time.Now()) {
-		return
+func (m *sessionMap) refreshSessionsWithReason(force bool, reason string) bool {
+	m.logger.Debugw("Audio session refresh requested", "reason", reason, "force", force)
+	m.refreshStateMu.Lock()
+	m.refreshRequests++
+	requestID := m.refreshRequests
+	if m.released {
+		m.refreshStateMu.Unlock()
+		m.logger.Debugw("Audio session refresh ignored after shutdown", "requestID", requestID, "reason", reason)
+		return false
 	}
-
-	// clear and release sessions first
-	m.clear()
-
-	if err := m.getAndAddSessions(); err != nil {
-		m.logger.Warnw("Failed to re-acquire all audio sessions", "error", err)
-	} else {
-		m.logger.Debug("Re-acquired sessions successfully")
+	if m.refreshInProgress {
+		done := m.refreshDone
+		m.refreshStateMu.Unlock()
+		<-done
+		m.logger.Debugw("Audio session refresh coalesced", "requestID", requestID, "reason", reason)
+		return false
 	}
+	lastCompleted := m.lastSessionRefresh
+	now := time.Now()
+	if !force && lastCompleted.Add(minTimeBetweenSessionRefreshes).After(now) {
+		m.refreshStateMu.Unlock()
+		m.logger.Debugw("Audio session refresh suppressed by global cooldown",
+			"requestID", requestID,
+			"reason", reason,
+			"sincePreviousCompletion", now.Sub(lastCompleted))
+		return false
+	}
+	m.refreshInProgress = true
+	m.refreshDone = make(chan struct{})
+	m.refreshStateMu.Unlock()
+
+	m.logger.Debugw("Audio session refresh started", "requestID", requestID, "reason", reason, "sincePreviousCompletion", now.Sub(lastCompleted))
+	m.refreshMu.Lock()
+	err := m.refreshSessionSnapshot(reason)
+	m.refreshMu.Unlock()
+	m.completeCoordinatedRefresh(time.Now())
+	if err != nil {
+		m.logger.Warnw("Failed to re-acquire all audio sessions", "requestID", requestID, "reason", reason, "error", err)
+		return true
+	}
+	m.logger.Debugw("Audio session refresh completed", "requestID", requestID, "reason", reason)
+	return true
+}
+
+func (m *sessionMap) finishRefresh(completed time.Time) {
+	m.refreshStateMu.Lock()
+	m.lastSessionRefresh = completed
+	m.refreshStateMu.Unlock()
+}
+
+func (m *sessionMap) completeCoordinatedRefresh(completed time.Time) {
+	m.refreshStateMu.Lock()
+	m.lastSessionRefresh = completed
+	m.refreshInProgress = false
+	close(m.refreshDone)
+	m.refreshDone = nil
+	m.refreshStateMu.Unlock()
+}
+
+func (m *sessionMap) sessionSnapshotStale(now time.Time) bool {
+	m.refreshStateMu.Lock()
+	defer m.refreshStateMu.Unlock()
+	return m.lastSessionRefresh.Add(maxTimeBetweenSessionRefreshes).Before(now)
 }
 
 // returns true if a session is not currently mapped to any slider, false otherwise
@@ -208,9 +286,9 @@ func (m *sessionMap) sessionMapped(session Session) bool {
 func (m *sessionMap) handleSliderMoveEvent(event SliderMoveEvent) {
 
 	// first of all, ensure our session map isn't moldy
-	if m.lastSessionRefresh.Add(maxTimeBetweenSessionRefreshes).Before(time.Now()) {
+	if m.sessionSnapshotStale(time.Now()) {
 		m.logger.Debug("Stale session map detected on slider move, refreshing")
-		m.refreshSessions(true)
+		m.refreshSessionsWithReason(false, "slider-stale-snapshot")
 	}
 
 	// get the targets mapped to this slider from the config
@@ -223,6 +301,7 @@ func (m *sessionMap) handleSliderMoveEvent(event SliderMoveEvent) {
 
 	targetFound := false
 	adjustmentFailed := false
+	m.lock.Lock()
 
 	// for each possible target for this slider...
 	for _, target := range targets {
@@ -235,7 +314,7 @@ func (m *sessionMap) handleSliderMoveEvent(event SliderMoveEvent) {
 		for _, resolvedTarget := range resolvedTargets {
 
 			// check the map for matching sessions
-			sessions, ok := m.get(resolvedTarget)
+			sessions, ok := m.m[resolvedTarget]
 
 			// no sessions matching this target - move on
 			if !ok {
@@ -255,31 +334,42 @@ func (m *sessionMap) handleSliderMoveEvent(event SliderMoveEvent) {
 			}
 		}
 	}
+	m.lock.Unlock()
 
 	// if we still haven't found a target or the volume adjustment failed, maybe look for the target again.
 	// processes could've opened since the last time this slider moved.
 	// if they haven't, the cooldown will take care to not spam it up
 	if !targetFound {
-		m.refreshSessions(false)
+		m.refreshSessionsWithReason(false, "slider-target-unavailable")
 	} else if adjustmentFailed {
 
 		// performance: the reason that forcing a refresh here is okay is that we'll only get here
 		// when a session's SetVolume call errored, such as in the case of a stale master session
 		// (or another, more catastrophic failure happens)
-		m.refreshSessions(true)
+		m.refreshSessionsWithReason(false, "slider-session-error")
 	}
 }
 
 // ExecuteAudioCommand lets future encoder/button event sources use the tray
 // application's existing session snapshot without depending on SerialIO.
 func (m *sessionMap) ExecuteAudioCommand(command AudioCommand) (AudioCommandResult, error) {
-	if m.lastSessionRefresh.Add(maxTimeBetweenSessionRefreshes).Before(time.Now()) {
-		m.refreshSessions(true)
+	if m.sessionSnapshotStale(time.Now()) {
+		m.refreshSessionsWithReason(false, "command-stale-snapshot")
 	}
 
 	m.lock.Lock()
-	defer m.lock.Unlock()
+	result, err := m.executeAudioCommandLocked(command)
+	m.lock.Unlock()
+	if errors.Is(err, errRefreshSessions) {
+		m.refreshSessionsWithReason(false, "command-reported-stale-session")
+		m.lock.Lock()
+		result, err = m.executeAudioCommandLocked(command)
+		m.lock.Unlock()
+	}
+	return result, err
+}
 
+func (m *sessionMap) executeAudioCommandLocked(command AudioCommand) (AudioCommandResult, error) {
 	resolvedTargets := m.resolveTarget(command.Target)
 	seen := make(map[Session]struct{})
 	matched := make([]audioCommandSession, 0)
