@@ -1,6 +1,7 @@
 package mixr
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -65,6 +66,14 @@ func newHardwareMutePrototype(mixr *Mixr, logger *zap.SugaredLogger) *hardwareMu
 			prototypeChromeMuteControl,
 			prototypeForegroundMuteControl,
 			prototypeMicrophoneMuteControl,
+		}
+		if mixr.config.HardwareMutePrototype.FollowSliderMapping {
+			// Firmware identities describe positions, not application names.
+			// Resolve these references at command time so reloads affect both
+			// mute actions and LED readback without restarting the controller.
+			for index, controlID := range controlOrder[:4] {
+				controls[controlID].target = fmt.Sprintf("%s%d", sliderCommandTargetPrefix, index)
+			}
 		}
 	}
 	return &hardwareMutePrototype{

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +12,9 @@ import (
 	"github.com/thoas/go-funk"
 	"go.uber.org/zap"
 )
+
+// Command-only references use the same live mapping as a physical knob.
+const sliderCommandTargetPrefix = "deej.slider."
 
 type sessionMap struct {
 	mixr   *Mixr
@@ -381,7 +385,18 @@ func (m *sessionMap) ExecuteAudioCommand(command AudioCommand) (AudioCommandResu
 }
 
 func (m *sessionMap) executeAudioCommandLocked(command AudioCommand) (AudioCommandResult, error) {
-	resolvedTargets := m.resolveTarget(command.Target)
+	targets := []string{command.Target}
+	if strings.HasPrefix(strings.ToLower(command.Target), sliderCommandTargetPrefix) {
+		index, err := strconv.Atoi(strings.TrimPrefix(strings.ToLower(command.Target), sliderCommandTargetPrefix))
+		if err != nil || index < 0 || m.mixr == nil || m.mixr.config == nil || m.mixr.config.SliderMapping == nil {
+			return AudioCommandResult{Target: command.Target}, fmt.Errorf("invalid slider command target %q", command.Target)
+		}
+		targets, _ = m.mixr.config.SliderMapping.get(index)
+	}
+	resolvedTargets := []string{}
+	for _, target := range targets {
+		resolvedTargets = append(resolvedTargets, m.resolveTarget(target)...)
+	}
 	seen := make(map[Session]struct{})
 	matched := make([]audioCommandSession, 0)
 	for _, target := range resolvedTargets {

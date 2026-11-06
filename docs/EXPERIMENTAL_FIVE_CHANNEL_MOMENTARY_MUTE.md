@@ -55,6 +55,11 @@ the D6-D11 controls.
 
 ## Hardware and logical mapping
 
+The table shows legacy/default bindings. With `follow_slider_mapping: true`,
+the A0-A3 button/LED pairs instead follow `slider_mapping` entries 0-3. A4 and
+its button/LED remain the default microphone path. Firmware control IDs stay
+unchanged, even when a channel is reassigned to another application.
+
 | Channel | Analog | Button | LED | Control ID | Default target |
 |---|---:|---:|---:|---|---|
 | 1 | A0 | D2 | D3 | `master-mute` | `master` (current default playback endpoint) |
@@ -149,6 +154,54 @@ hardware_mute_prototype:
 case-normalized and fall back with a configuration warning if empty. Master and
 microphone remain fixed special targets so they always follow the current
 default endpoints.
+
+### Follow each knob's mapping
+
+To avoid separately maintaining button targets, enable the opt-in mapping mode:
+
+```yaml
+slider_mapping:
+  0: master
+  1: spotify.exe
+  2: chrome.exe
+  3: discord.exe
+
+hardware_mute_prototype:
+  enabled: true
+  five_channel_momentary: true
+  follow_slider_mapping: true
+  poll_interval_ms: 500
+  microphone_level_inverted: false
+  microphone_level_deadband: 12
+```
+
+In this mode the first four buttons and LEDs resolve the same current config
+mapping as their knobs. The separate `target`, `chrome_target`, and
+`foreground_target` entries are ignored. A0's button also follows entry 0,
+rather than being permanently tied to master. A4 stays the default microphone;
+adding `slider_mapping.4` does not remap that separate firmware path.
+
+Changing entry 3 to `deej.current` makes both knob and button follow the active
+audio application. Lists of applications are supported: the button mutes all
+matched sessions unless all are already muted, in which case it unmutes all.
+The LED is on only when every observed session is muted. An absent mapping or
+no matching sessions leaves the LED off and performs no action; it never falls
+back to the previous application's mapping. Overlapping targets are deduplicated
+within each button command. Closed applications in a group contribute no live
+sessions, consistent with the knob's existing behavior.
+
+Restart once when enabling/disabling this mode or changing firmware mode.
+Subsequent `slider_mapping` edits take effect after a successful existing config
+reload, including the next LED poll; no restart is needed for those edits.
+Reload itself never toggles mute, and it does not rearm a button held down.
+Omitting `follow_slider_mapping` defaults it to false and preserves legacy
+configurations. It applies only with `five_channel_momentary: true`.
+
+The live mapping object publishes complete replacements under its lock, keeping
+button/LED/knob readers safe while configuration reloads. Synthetic integration
+tests cover grouped mute, case normalization, duplicate sessions, runtime
+remapping, held-button deduplication, removed mappings, foreground targets and
+legacy mode. Physical reconfiguration/LED verification remains pending.
 
 ## Firmware build and upload
 
@@ -246,3 +299,18 @@ passed only from direct observation.
   if Arduino CLI and the installed Nano R4 core are unavailable here.
 - The experimental five-channel interface is not the final six-encoder VFinal
   control surface or protocol.
+
+### Mapping-mode validation — 2026-11-06
+
+Based on the isolated foreground callback fix 46ddbf5. Full
+`go test -count=1 -buildvcs=false ./...`, established Windows development and
+release builds, and routing/audio/microphone diagnostic builds passed for both
+386 and amd64. Vet reported only the documented existing unbuffered
+signal.Notify warning in util.go:43. The existing module stat-cache write warning
+was non-fatal. Race testing remains unavailable because CGO is disabled.
+No firmware changes or upload were performed. The final release keeps the
+foreground callback fix and a COM5 runtime config with follow_slider_mapping
+enabled; its separately retained bundle is identified in the delivery notes.
+Physical button/LED remapping, config-save behavior on the user's editor,
+combined Nano controls, reconnect, endpoint changes and the long stability soak
+remain unverified. No application was launched or stopped during this change.

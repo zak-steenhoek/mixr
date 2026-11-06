@@ -35,6 +35,7 @@ type CanonicalConfig struct {
 		Enabled                 bool
 		Target                  string
 		FiveChannelMomentary    bool
+		FollowSliderMapping     bool
 		ChromeTarget            string
 		ForegroundTarget        string
 		PollInterval            time.Duration
@@ -71,6 +72,7 @@ const (
 	configKeyHardwareMuteEnabled     = "hardware_mute_prototype.enabled"
 	configKeyHardwareMuteTarget      = "hardware_mute_prototype.target"
 	configKeyFiveChannelMomentary    = "hardware_mute_prototype.five_channel_momentary"
+	configKeyFollowSliderMapping     = "hardware_mute_prototype.follow_slider_mapping"
 	configKeyChromeMuteTarget        = "hardware_mute_prototype.chrome_target"
 	configKeyForegroundMuteTarget    = "hardware_mute_prototype.foreground_target"
 	configKeyHardwareMutePollMS      = "hardware_mute_prototype.poll_interval_ms"
@@ -103,6 +105,7 @@ func NewConfig(logger *zap.SugaredLogger, notifier Notifier) (*CanonicalConfig, 
 	logger = logger.Named("config")
 
 	cc := &CanonicalConfig{
+		SliderMapping:      newSliderMap(),
 		logger:             logger,
 		notifier:           notifier,
 		reloadConsumers:    []chan bool{},
@@ -123,6 +126,7 @@ func NewConfig(logger *zap.SugaredLogger, notifier Notifier) (*CanonicalConfig, 
 	userConfig.SetDefault(configKeyHardwareMuteEnabled, false)
 	userConfig.SetDefault(configKeyHardwareMuteTarget, defaultHardwareMuteTarget)
 	userConfig.SetDefault(configKeyFiveChannelMomentary, false)
+	userConfig.SetDefault(configKeyFollowSliderMapping, false)
 	userConfig.SetDefault(configKeyChromeMuteTarget, defaultChromeMuteTarget)
 	userConfig.SetDefault(configKeyForegroundMuteTarget, defaultForegroundMuteTarget)
 	userConfig.SetDefault(configKeyHardwareMutePollMS, defaultHardwareMutePollMS)
@@ -270,10 +274,17 @@ func (cc *CanonicalConfig) populateFromVipers() error {
 	cc.validateMappings(userMappings)
 
 	// merge the slider mappings from the user and internal configs
-	cc.SliderMapping = sliderMapFromConfigs(
+	nextMappings := sliderMapFromConfigs(
 		userMappings,
 		internalMappings,
 	)
+	// Keep the published map's identity stable. Knobs and button commands may
+	// read it while a configuration reload atomically replaces its contents.
+	if cc.SliderMapping == nil {
+		cc.SliderMapping = nextMappings
+	} else {
+		cc.SliderMapping.replace(nextMappings)
+	}
 
 	// get the rest of the config fields - viper saves us a lot of effort here
 	cc.ConnectionInfo.COMPort = strings.TrimSpace(cc.userConfig.GetString(configKeyCOMPort))
@@ -302,6 +313,10 @@ func (cc *CanonicalConfig) populateFromVipers() error {
 		cc.HardwareMutePrototype.Target = defaultHardwareMuteTarget
 	}
 	cc.HardwareMutePrototype.FiveChannelMomentary = cc.userConfig.GetBool(configKeyFiveChannelMomentary)
+	cc.HardwareMutePrototype.FollowSliderMapping = cc.userConfig.GetBool(configKeyFollowSliderMapping)
+	if cc.HardwareMutePrototype.FollowSliderMapping && !cc.HardwareMutePrototype.FiveChannelMomentary {
+		cc.addValidationWarning("hardware_mute_prototype.follow_slider_mapping requires five_channel_momentary; retaining legacy mute targets")
+	}
 	cc.HardwareMutePrototype.ChromeTarget = canonicalPrototypeTarget(cc, configKeyChromeMuteTarget, defaultChromeMuteTarget)
 	cc.HardwareMutePrototype.ForegroundTarget = canonicalPrototypeTarget(cc, configKeyForegroundMuteTarget, defaultForegroundMuteTarget)
 	pollInterval := time.Duration(cc.userConfig.GetInt(configKeyHardwareMutePollMS)) * time.Millisecond

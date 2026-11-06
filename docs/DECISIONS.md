@@ -130,3 +130,18 @@ feedback.
 
 Update this log when an architecture decision changes or a new consequential
 choice is accepted. Do not add entries for routine implementation details.
+
+## D-011 — Single mapping per experimental physical channel (Accepted)
+
+**Decision.** The five-channel momentary prototype supports opt-in
+`hardware_mute_prototype.follow_slider_mapping`. In that mode, the A0-A3 knob,
+button and LED pairs share `slider_mapping` entries 0-3, resolved at command
+and readback time. A4 retains its separate default-microphone path.
+
+**Rationale.** Independent knob and button targets can drift apart, causing a
+working volume knob to accompany an unrelated mute button/LED. **Consequences.**
+Application lists and special targets use the existing resolution semantics;
+successful config reloads retarget actions and LED reads together, without
+mutating mute state. **Limitations.** Mode changes require restart, the feature
+is opt-in to preserve older configurations/firmware, and physical testing is
+still required. This does not implement the planned six-encoder architecture.

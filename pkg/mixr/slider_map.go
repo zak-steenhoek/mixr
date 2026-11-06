@@ -91,6 +91,13 @@ func (m *sliderMap) set(key int, value []string) {
 	m.m[key] = value
 }
 
+// replace publishes a complete, newly constructed mapping in one transaction.
+func (m *sliderMap) replace(next *sliderMap) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	m.m = next.m
+}
+
 func (m *sliderMap) String() string {
 	m.lock.Lock()
 	defer m.lock.Unlock()

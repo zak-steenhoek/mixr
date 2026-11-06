@@ -266,6 +266,7 @@ func (d *Mixr) logStartupDiagnostics() {
 		"hardwareMuteEnabled", d.config.HardwareMutePrototype.Enabled,
 		"hardwareMuteTarget", d.config.HardwareMutePrototype.Target,
 		"fiveChannelMomentary", d.config.HardwareMutePrototype.FiveChannelMomentary,
+		"muteFollowsSliderMapping", d.config.HardwareMutePrototype.FollowSliderMapping,
 		"chromeMuteTarget", d.config.HardwareMutePrototype.ChromeTarget,
 		"foregroundMuteTarget", d.config.HardwareMutePrototype.ForegroundTarget,
 		"microphoneAnalogEnabled", d.config.HardwareMutePrototype.Enabled,
