@@ -25,6 +25,7 @@ type sessionMap struct {
 	refreshInProgress bool
 	refreshDone       chan struct{}
 	released          bool
+	lastSuppressedLog time.Time
 
 	sessionFinder SessionFinder
 
@@ -59,6 +60,10 @@ const (
 	// to manually refresh sessions). a cleaner way to do this down the line is by registering to notifications
 	// whenever a new session is added, but that's too hard to justify for how easy this solution is
 	maxTimeBetweenSessionRefreshes = time.Second * 45
+
+	// routine cooldown suppression is useful forensic context but must not
+	// become another high-frequency diagnostic stream.
+	sessionRefreshDiagnosticInterval = 30 * time.Second
 )
 
 // this matches friendly device names (on Windows), e.g. "Headphones (Realtek Audio)"
@@ -180,7 +185,6 @@ func (m *sessionMap) refreshSessions(force bool) {
 }
 
 func (m *sessionMap) refreshSessionsWithReason(force bool, reason string) bool {
-	m.logger.Debugw("Audio session refresh requested", "reason", reason, "force", force)
 	m.refreshStateMu.Lock()
 	m.refreshRequests++
 	requestID := m.refreshRequests
@@ -199,17 +203,24 @@ func (m *sessionMap) refreshSessionsWithReason(force bool, reason string) bool {
 	lastCompleted := m.lastSessionRefresh
 	now := time.Now()
 	if !force && lastCompleted.Add(minTimeBetweenSessionRefreshes).After(now) {
+		logSuppression := !m.lastSuppressedLog.Add(sessionRefreshDiagnosticInterval).After(now)
+		if logSuppression {
+			m.lastSuppressedLog = now
+		}
 		m.refreshStateMu.Unlock()
-		m.logger.Debugw("Audio session refresh suppressed by global cooldown",
-			"requestID", requestID,
-			"reason", reason,
-			"sincePreviousCompletion", now.Sub(lastCompleted))
+		if logSuppression {
+			m.logger.Debugw("Audio session refresh suppressed by global cooldown",
+				"requestID", requestID,
+				"reason", reason,
+				"sincePreviousCompletion", now.Sub(lastCompleted))
+		}
 		return false
 	}
 	m.refreshInProgress = true
 	m.refreshDone = make(chan struct{})
 	m.refreshStateMu.Unlock()
 
+	m.logger.Debugw("Audio session refresh requested", "requestID", requestID, "reason", reason, "force", force)
 	m.logger.Debugw("Audio session refresh started", "requestID", requestID, "reason", reason, "sincePreviousCompletion", now.Sub(lastCompleted))
 	m.refreshMu.Lock()
 	err := m.refreshSessionSnapshot(reason)
