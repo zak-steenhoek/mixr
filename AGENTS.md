@@ -41,6 +41,22 @@ is recorded in [baseline validation](docs/BASELINE_VALIDATION.md),
 - `arduino/deej-5-sliders-vanilla/`: compatible one-way reference firmware.
 - `docs/`: requirements, decisions, validation reports, and contributor notes.
 
+## Efficient task discovery
+
+- Start with this file and the files directly relevant to the requested task.
+  Consult the latest applicable milestone report or architecture document when
+  its decisions or validation evidence are needed; do not automatically read
+  every historical document, source file, or entire directory.
+- Expand exploration as needed to understand dependencies, interfaces,
+  regressions, compatibility, or architectural implications. Reuse findings
+  from the current session instead of repeatedly reading unchanged files, and
+  prefer targeted searches, diffs, and file sections over broad repository
+  dumps.
+- Keep progress reports and final summaries concise while retaining material
+  test results, limitations, and commit information. Never trade correctness,
+  safety, required regression coverage, or compliance with the rules below for
+  lower context or token usage.
+
 ## Change discipline
 
 - Branch focused work as `track-<letter>/<scope>` and exploratory work as
