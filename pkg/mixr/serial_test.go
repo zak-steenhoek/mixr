@@ -38,13 +38,15 @@ func TestSerialLineParsingKeepsLegacyFramesSeparate(t *testing.T) {
 	sio.handleLine(sio.logger, "mixr:v1:event:switch:spotify-mute:1\r\n")
 	sio.handleLine(sio.logger, "mixr:v1:event:switch:master-mute:0\r\n")
 	sio.handleLine(sio.logger, "mixr:v1:event:switch:microphone-mute:1\r\n")
+	sio.handleLine(sio.logger, "mixr:v1:event:button:chrome-mute:1\r\n")
+	sio.handleLine(sio.logger, "mixr:v1:event:button:chrome-mute:0\r\n")
 	sio.handleLine(sio.logger, "mixr:v1:event:analog:microphone-level:512\r\n")
 
 	if len(sliderEvents) != 4 {
 		t.Fatalf("legacy slider event count = %d, want 4", len(sliderEvents))
 	}
-	if len(prototypeEvents) != 5 {
-		t.Fatalf("prototype event count = %d, want ready + three switches + analog", len(prototypeEvents))
+	if len(prototypeEvents) != 7 {
+		t.Fatalf("prototype event count = %d, want ready + three switches + press/release + analog", len(prototypeEvents))
 	}
 	ready := <-prototypeEvents
 	switchEvent := <-prototypeEvents
@@ -61,6 +63,11 @@ func TestSerialLineParsingKeepsLegacyFramesSeparate(t *testing.T) {
 	microphoneEvent := <-prototypeEvents
 	if microphoneEvent.ControlID != prototypeMicrophoneMuteControl || !microphoneEvent.SwitchClosed {
 		t.Fatalf("fourth prototype event = %#v, want closed microphone switch", microphoneEvent)
+	}
+	buttonPress := <-prototypeEvents
+	buttonRelease := <-prototypeEvents
+	if buttonPress.Kind != PrototypeSerialButtonEvent || !buttonPress.ButtonPressed || buttonRelease.ButtonPressed {
+		t.Fatalf("button sequence = %#v / %#v, want press/release", buttonPress, buttonRelease)
 	}
 	analogEvent := <-prototypeEvents
 	if analogEvent.Kind != PrototypeSerialAnalogEvent || analogEvent.AnalogValue != 512 {
@@ -89,6 +96,7 @@ func TestMalformedAndTruncatedSerialMessagesAreIgnored(t *testing.T) {
 		"0|256|broken|1023\r\n",
 		"mixr:v1:event:switch:spotify-mute:\r\n",
 		"mixr:v1:event:analog:microphone-level:1024\r\n",
+		"mixr:v1:event:button:chrome-mute:2\r\n",
 		"partial without newline",
 	} {
 		sio.handleLine(sio.logger, line)
@@ -154,6 +162,18 @@ func TestPrototypeIndicatorSuppressesDuplicateWrites(t *testing.T) {
 	if err := sio.setPrototypeIndicator(prototypeMicrophoneMuteControl, true); err != nil {
 		t.Fatal(err)
 	}
+	if err := sio.setPrototypeIndicator(prototypeChromeMuteControl, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := sio.setPrototypeIndicator(prototypeChromeMuteControl, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := sio.setPrototypeIndicator(prototypeForegroundMuteControl, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := sio.setPrototypeIndicator(prototypeForegroundMuteControl, true); err != nil {
+		t.Fatal(err)
+	}
 
 	want := []string{
 		"mixr:v1:state:indicator:spotify-mute:0\n",
@@ -162,6 +182,10 @@ func TestPrototypeIndicatorSuppressesDuplicateWrites(t *testing.T) {
 		"mixr:v1:state:indicator:master-mute:1\n",
 		"mixr:v1:state:indicator:microphone-mute:0\n",
 		"mixr:v1:state:indicator:microphone-mute:1\n",
+		"mixr:v1:state:indicator:chrome-mute:0\n",
+		"mixr:v1:state:indicator:chrome-mute:1\n",
+		"mixr:v1:state:indicator:foreground-mute:0\n",
+		"mixr:v1:state:indicator:foreground-mute:1\n",
 	}
 	if len(conn.writes) != len(want) {
 		t.Fatalf("write count = %d, want %d (%q)", len(conn.writes), len(want), conn.writes)

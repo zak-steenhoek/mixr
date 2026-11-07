@@ -14,6 +14,8 @@ const (
 	prototypeReadyMessage           = prototypeProtocolPrefix + "ready"
 	prototypeSpotifyMuteControl     = "spotify-mute"
 	prototypeMasterMuteControl      = "master-mute"
+	prototypeChromeMuteControl      = "chrome-mute"
+	prototypeForegroundMuteControl  = "foreground-mute"
 	prototypeMicrophoneMuteControl  = "microphone-mute"
 	prototypeMicrophoneLevelControl = "microphone-level"
 )
@@ -23,15 +25,17 @@ type PrototypeSerialEventKind string
 const (
 	PrototypeSerialReady       PrototypeSerialEventKind = "ready"
 	PrototypeSerialSwitchEvent PrototypeSerialEventKind = "switch"
+	PrototypeSerialButtonEvent PrototypeSerialEventKind = "button"
 	PrototypeSerialAnalogEvent PrototypeSerialEventKind = "analog"
 )
 
 // PrototypeSerialEvent is emitted only for recognized v1 firmware messages.
 type PrototypeSerialEvent struct {
-	Kind         PrototypeSerialEventKind
-	ControlID    string
-	SwitchClosed bool
-	AnalogValue  int
+	Kind          PrototypeSerialEventKind
+	ControlID     string
+	SwitchClosed  bool
+	ButtonPressed bool
+	AnalogValue   int
 }
 
 func parsePrototypeSerialLine(line string) (PrototypeSerialEvent, bool) {
@@ -50,18 +54,33 @@ func parsePrototypeSerialLine(line string) (PrototypeSerialEvent, bool) {
 	}
 
 	const switchPrefix = prototypeProtocolPrefix + "event:switch:"
-	if !strings.HasPrefix(line, switchPrefix) {
-		return PrototypeSerialEvent{}, false
+	if strings.HasPrefix(line, switchPrefix) {
+		return parsePrototypeDigitalEvent(strings.TrimPrefix(line, switchPrefix), PrototypeSerialSwitchEvent)
 	}
-	parts := strings.Split(strings.TrimPrefix(line, switchPrefix), ":")
+
+	const buttonPrefix = prototypeProtocolPrefix + "event:button:"
+	if strings.HasPrefix(line, buttonPrefix) {
+		return parsePrototypeDigitalEvent(strings.TrimPrefix(line, buttonPrefix), PrototypeSerialButtonEvent)
+	}
+	return PrototypeSerialEvent{}, false
+}
+
+func parsePrototypeDigitalEvent(payload string, kind PrototypeSerialEventKind) (PrototypeSerialEvent, bool) {
+	parts := strings.Split(payload, ":")
 	if len(parts) != 2 || parts[0] == "" {
 		return PrototypeSerialEvent{}, false
 	}
+	event := PrototypeSerialEvent{Kind: kind, ControlID: parts[0]}
 	switch parts[1] {
 	case "0":
-		return PrototypeSerialEvent{Kind: PrototypeSerialSwitchEvent, ControlID: parts[0], SwitchClosed: false}, true
+		return event, true
 	case "1":
-		return PrototypeSerialEvent{Kind: PrototypeSerialSwitchEvent, ControlID: parts[0], SwitchClosed: true}, true
+		if kind == PrototypeSerialButtonEvent {
+			event.ButtonPressed = true
+		} else {
+			event.SwitchClosed = true
+		}
+		return event, true
 	default:
 		return PrototypeSerialEvent{}, false
 	}

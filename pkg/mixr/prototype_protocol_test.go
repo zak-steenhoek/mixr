@@ -14,11 +14,14 @@ func TestParsePrototypeSerialLine(t *testing.T) {
 		{name: "switch closed", line: "mixr:v1:event:switch:spotify-mute:1\n", want: PrototypeSerialEvent{Kind: PrototypeSerialSwitchEvent, ControlID: prototypeSpotifyMuteControl, SwitchClosed: true}, valid: true},
 		{name: "master switch closed", line: "mixr:v1:event:switch:master-mute:1\n", want: PrototypeSerialEvent{Kind: PrototypeSerialSwitchEvent, ControlID: prototypeMasterMuteControl, SwitchClosed: true}, valid: true},
 		{name: "microphone switch", line: "mixr:v1:event:switch:microphone-mute:1\n", want: PrototypeSerialEvent{Kind: PrototypeSerialSwitchEvent, ControlID: prototypeMicrophoneMuteControl, SwitchClosed: true}, valid: true},
+		{name: "Chrome button press", line: "mixr:v1:event:button:chrome-mute:1\n", want: PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: prototypeChromeMuteControl, ButtonPressed: true}, valid: true},
+		{name: "foreground button release", line: "mixr:v1:event:button:foreground-mute:0\r\n", want: PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: prototypeForegroundMuteControl}, valid: true},
 		{name: "microphone analog", line: "mixr:v1:event:analog:microphone-level:512\n", want: PrototypeSerialEvent{Kind: PrototypeSerialAnalogEvent, ControlID: prototypeMicrophoneLevelControl, AnalogValue: 512}, valid: true},
 		{name: "microphone analog too high", line: "mixr:v1:event:analog:microphone-level:1024\n", valid: false},
 		{name: "legacy analog", line: "10|20|30|40\r\n", valid: false},
 		{name: "future version", line: "mixr:v2:ready\r\n", valid: false},
 		{name: "invalid state", line: "mixr:v1:event:switch:spotify-mute:true\r\n", valid: false},
+		{name: "invalid button state", line: "mixr:v1:event:button:chrome-mute:press\r\n", valid: false},
 		{name: "unknown message", line: "mixr:v1:event:encoder:one:1\r\n", valid: false},
 	}
 
@@ -47,5 +50,11 @@ func TestPrototypeIndicatorMessage(t *testing.T) {
 	}
 	if got := prototypeIndicatorMessage(prototypeMicrophoneMuteControl, true); got != "mixr:v1:state:indicator:microphone-mute:1" {
 		t.Fatalf("microphone on message = %q", got)
+	}
+	if got := prototypeIndicatorMessage(prototypeChromeMuteControl, true); got != "mixr:v1:state:indicator:chrome-mute:1" {
+		t.Fatalf("Chrome on message = %q", got)
+	}
+	if got := prototypeIndicatorMessage(prototypeForegroundMuteControl, false); got != "mixr:v1:state:indicator:foreground-mute:0" {
+		t.Fatalf("foreground off message = %q", got)
 	}
 }

@@ -26,12 +26,21 @@ baud_rate: 9600
 # supported values are "low" (excellent hardware), "default" (regular hardware) or "high" (bad, noisy hardware)
 noise_reduction: default
 
-# EXPERIMENTAL Nano R4 three-mute / microphone-level proof of concept.
-# Requires the separate mixr-microphone-controls-prototype Arduino sketch. Restart
-# mixr after changing these values; config hot-reload is not supported here.
+# EXPERIMENTAL Nano R4 mute / microphone-level proof of concept. The default
+# mode requires the separate three-mute sketch; the opt-in five-channel mode
+# requires its own momentary-button sketch. Restart mixr after changing these
+# values; config hot-reload is not supported here.
 hardware_mute_prototype:
   enabled: false
   target: spotify.exe
+  # Enable only with the five-channel momentary prototype sketch. Older
+  # three-mute firmware remains supported when this is false.
+  five_channel_momentary: false
+  # In five-channel mode, opt in so A0-A3 buttons/LEDs follow slider_mapping.
+  # A4 remains the separate default-microphone channel. Restart to change mode.
+  follow_slider_mapping: false
+  chrome_target: chrome.exe
+  foreground_target: deej.current
   poll_interval_ms: 500
   # Set true if A4's physical direction should be reversed.
   microphone_level_inverted: false

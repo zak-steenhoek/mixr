@@ -22,9 +22,15 @@ operational procedure changes.
   serial protocol; Nano R4 with four potentiometers; independent master, Chrome,
   Spotify, and foreground-app volume control; 386/amd64 audio paths; and the
   routing feasibility spike.
-- Planned, not implemented: six relative-encoder channels, button mute with
-  software-controlled indicators, five persistent application routes,
-  bidirectional hardware feedback, and the central display.
+- Track D0: five-channel analog momentary mute/LED and microphone prototype,
+  refresh/COM ownership fixes, and callback regression guard are integrated.
+  User-reported soak, channel/LED, microphone, endpoint and USB recovery passed
+  on `5b955d1`; dynamic foreground switching and race testing remain deferred.
+  See [D0 integration and qualification](docs/D0_INTEGRATION.md).
+- Planned VFinal scope: six relative-encoder channels and their mute/indicators,
+  five persistent application routes, final bidirectional hardware feedback,
+  and the central display. D0's additive analog prototype is not this final
+  six-channel interface.
 - Unresolved: final display part, production MCU, PCB topology, and enclosure.
 
 Never describe a spike or planned design as production functionality. Evidence

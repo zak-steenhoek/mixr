@@ -94,7 +94,7 @@ func (d *Mixr) initializeTray(onDone func()) {
 
 					// performance: the reason that forcing a refresh here is okay is that users can't spam the
 					// right-click -> select-this-option sequence at a rate that's meaningful to performance
-					d.sessions.refreshSessions(true)
+					d.sessions.refreshSessionsWithReason(true, "manual-tray-refresh")
 				}
 			}
 		}()

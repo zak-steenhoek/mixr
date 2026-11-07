@@ -45,8 +45,12 @@ than a one-way switch. For a multi-session application, state is `all-muted`,
 mutes every session. Track B1 reads actual state and uses audited 32-bit Windows
 `BOOL` bindings; see [relative volume and mute](RELATIVE_VOLUME_MUTE.md).
 **Limitations.** Indicator technology and asynchronous external-change
-notification details are unresolved, and no button/indicator protocol exists
-yet.
+notification details remain unresolved for VFinal. Track D0 implements an
+five-channel analog prototype using additive `mixr:v1` momentary button events
+and polling-based indicator readback. Its channel/LED and soak behavior was
+reported physically passed at `5b955d1`; dynamic foreground switching remains
+deferred. See [D0 integration](D0_INTEGRATION.md). This is not the final
+six-channel protocol or production hardware.
 
 ## D-004 — Default-endpoint master (Accepted)
 
@@ -94,7 +98,10 @@ hardware-to-host input.
 **Rationale.** Encoder, mute-indicator, and display state require host feedback.
 **Consequences.** The protocol needs framing, versioning, validation, and safe
 recovery from partial/unknown messages. **Limitations.** The message schema is
-unresolved, and original deej frames must continue to work.
+unresolved for VFinal, and original deej frames must continue to work. The
+experimental `mixr:v1` handshake, input events, and indicator-state messages
+used by the analog prototypes are additive compatibility evidence, not a final
+protocol selection.
 
 ## D-009 — Audited Windows COM compatibility layer (Accepted)
 
@@ -103,8 +110,11 @@ legacy dependency methods.
 
 **Rationale.** The audit found pointer-width, `HRESULT`, `BOOL`, output-width,
 callback, and lifetime defects. **Consequences.** New COM calls require explicit
-ABI review and tests on 386 and amd64. **Limitations.** The layer covers audited
-call paths, not every method in the pinned dependency; see
+ABI review and tests on 386 and amd64. The integrated D0 stability fix places
+discovery, retained session operations, release, and apartment shutdown on one
+dedicated OS-thread owner; see
+[Track D0 runtime stability](D0_RUNTIME_STABILITY.md). **Limitations.** The
+layer covers audited call paths, not every method in the pinned dependency; see
 [WINDOWS_AUDIO_HARDENING.md](WINDOWS_AUDIO_HARDENING.md).
 
 ## D-010 — Original deej protocol compatibility (Accepted)
@@ -122,3 +132,21 @@ feedback.
 
 Update this log when an architecture decision changes or a new consequential
 choice is accepted. Do not add entries for routine implementation details.
+
+## D-011 — Single mapping per experimental physical channel (Accepted)
+
+**Decision.** The five-channel momentary prototype supports opt-in
+`hardware_mute_prototype.follow_slider_mapping`. In that mode, the A0-A3 knob,
+button and LED pairs share `slider_mapping` entries 0-3, resolved at command
+and readback time. A4 retains its separate default-microphone path.
+
+**Rationale.** Independent knob and button targets can drift apart, causing a
+working volume knob to accompany an unrelated mute button/LED. **Consequences.**
+Application lists and special targets use the existing resolution semantics;
+successful config reloads retarget actions and LED reads together, without
+mutating mute state. **Limitations.** Mode changes require restart, the feature
+is opt-in to preserve older configurations/firmware. User-reported physical
+tests passed with Discord on channel four; dynamic foreground switching and
+final mainline qualification remain deferred as recorded in
+[D0 integration](D0_INTEGRATION.md). This does not implement the planned
+six-encoder architecture.

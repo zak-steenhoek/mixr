@@ -265,6 +265,10 @@ func (d *Mixr) logStartupDiagnostics() {
 		"analogMappings", d.config.SliderMapping,
 		"hardwareMuteEnabled", d.config.HardwareMutePrototype.Enabled,
 		"hardwareMuteTarget", d.config.HardwareMutePrototype.Target,
+		"fiveChannelMomentary", d.config.HardwareMutePrototype.FiveChannelMomentary,
+		"muteFollowsSliderMapping", d.config.HardwareMutePrototype.FollowSliderMapping,
+		"chromeMuteTarget", d.config.HardwareMutePrototype.ChromeTarget,
+		"foregroundMuteTarget", d.config.HardwareMutePrototype.ForegroundTarget,
 		"microphoneAnalogEnabled", d.config.HardwareMutePrototype.Enabled,
 		"microphoneInverted", d.config.HardwareMutePrototype.MicrophoneLevelInverted,
 		"microphoneDeadbandADC", d.config.HardwareMutePrototype.MicrophoneLevelDeadband,
@@ -288,6 +292,10 @@ func (d *Mixr) logStartupDiagnostics() {
 		targetSet[d.config.HardwareMutePrototype.Target] = struct{}{}
 		targetSet[masterSessionName] = struct{}{}
 		targetSet[inputSessionName] = struct{}{}
+		if d.config.HardwareMutePrototype.FiveChannelMomentary {
+			targetSet[d.config.HardwareMutePrototype.ChromeTarget] = struct{}{}
+			targetSet[d.config.HardwareMutePrototype.ForegroundTarget] = struct{}{}
+		}
 	}
 	targets := make([]string, 0, len(targetSet))
 	for target := range targetSet {

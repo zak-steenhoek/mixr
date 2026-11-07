@@ -20,6 +20,20 @@ environment and limits stated in the linked report.
 | COM-001 | Production Windows audio calls use audited, native-width COM bindings on both `386` and `amd64`. | Validated | ABI audit, compatibility layer, and automated/live checks in [WINDOWS_AUDIO_HARDENING.md](WINDOWS_AUDIO_HARDENING.md). |
 | RTE-001 | Windows can persist and read back a per-application playback preference without changing default-endpoint master behavior. | Validated | Feasibility only, on the recorded Windows build; see [WINDOWS_ROUTING_SPIKE.md](WINDOWS_ROUTING_SPIKE.md). This is not yet a product feature. |
 
+## Track D0 prototype integration
+
+The five-channel analog prototype now has user-reported physical evidence at
+`5b955d1`: channel volume/mute, LED synchronization, microphone controls,
+playback/recording endpoint recovery, USB recovery, and a long-duration soak.
+The fourth analog channel was mapped to Discord; dynamic `deej.current`
+switching was not physically exercised. Callback guards added at `80a9f0a`
+change tests/documentation only. See [D0 integration](D0_INTEGRATION.md) for the
+automated matrix, evidence limits, and remaining mainline qualification.
+
+This supplies prototype evidence toward AUD-102 and SER-101; their final
+six-channel acceptance criteria remain planned. It does not validate encoders,
+production hardware, routing selectors, or the central display.
+
 ## VFinal capabilities
 
 | ID | Requirement | Status | Acceptance criteria / open point |

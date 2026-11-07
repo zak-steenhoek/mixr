@@ -4,6 +4,12 @@ mixr is an **open-source hardware volume mixer** for Windows and Linux PCs. It l
 
 mixr is based on [deej](https://github.com/omriharel/deej) and preserves compatibility with its Arduino firmware, serial protocol, configuration format, and special mapping names such as `deej.current` and `deej.unmapped`.
 
+The current Windows development baseline is `main`, including the Track D0
+five-channel analog mute/LED prototype and stability fixes. See
+[D0 integration and qualification](docs/D0_INTEGRATION.md) for validated results,
+configuration, and deferred foreground/race checks. The final six-encoder
+interface remains planned.
+
 **Join the [deej Discord server](https://discord.gg/nf88NJu) if you need help or have any questions!**
 
 [![Discord](https://img.shields.io/discord/702940502038937667?logo=discord)](https://discord.gg/nf88NJu)

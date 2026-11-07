@@ -1,13 +1,13 @@
 package mixr
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 )
 
-const prototypeSessionRefreshCooldown = 5 * time.Second
 const prototypeWarningInterval = 30 * time.Second
 
 type prototypeIndicatorWriter interface {
@@ -15,22 +15,25 @@ type prototypeIndicatorWriter interface {
 }
 
 type prototypeMuteControl struct {
-	target             string
-	hasLastSwitch      bool
-	lastSwitchClosed   bool
-	lastSessionRefresh time.Time
+	target            string
+	hasLastSwitch     bool
+	lastSwitchClosed  bool
+	hasLastButton     bool
+	lastButtonPressed bool
 }
 
-// hardwareMutePrototype is intentionally narrow and disposable. It proves
-// three switch -> Windows mute -> observed indicator loops plus one absolute
-// microphone-level path without defining VFinal's channel architecture.
+// hardwareMutePrototype is intentionally narrow and disposable. It supports
+// the validated three-switch prototype and the opt-in five-button experiment,
+// plus one absolute microphone-level path, without defining VFinal's channel
+// architecture.
 type hardwareMutePrototype struct {
 	logger                  *zap.SugaredLogger
 	commander               AudioCommander
 	indicator               prototypeIndicatorWriter
 	events                  <-chan PrototypeSerialEvent
-	refresh                 func()
+	refresh                 func(reason string) bool
 	controls                map[string]*prototypeMuteControl
+	controlOrder            []string
 	poll                    time.Duration
 	verbose                 bool
 	microphoneLevelInverted bool
@@ -48,19 +51,41 @@ type hardwareMutePrototype struct {
 }
 
 func newHardwareMutePrototype(mixr *Mixr, logger *zap.SugaredLogger) *hardwareMutePrototype {
+	controls := map[string]*prototypeMuteControl{
+		prototypeSpotifyMuteControl:    {target: mixr.config.HardwareMutePrototype.Target},
+		prototypeMasterMuteControl:     {target: masterSessionName},
+		prototypeMicrophoneMuteControl: {target: inputSessionName},
+	}
+	controlOrder := []string{prototypeMasterMuteControl, prototypeSpotifyMuteControl, prototypeMicrophoneMuteControl}
+	if mixr.config.HardwareMutePrototype.FiveChannelMomentary {
+		controls[prototypeChromeMuteControl] = &prototypeMuteControl{target: mixr.config.HardwareMutePrototype.ChromeTarget}
+		controls[prototypeForegroundMuteControl] = &prototypeMuteControl{target: mixr.config.HardwareMutePrototype.ForegroundTarget}
+		controlOrder = []string{
+			prototypeMasterMuteControl,
+			prototypeSpotifyMuteControl,
+			prototypeChromeMuteControl,
+			prototypeForegroundMuteControl,
+			prototypeMicrophoneMuteControl,
+		}
+		if mixr.config.HardwareMutePrototype.FollowSliderMapping {
+			// Firmware identities describe positions, not application names.
+			// Resolve these references at command time so reloads affect both
+			// mute actions and LED readback without restarting the controller.
+			for index, controlID := range controlOrder[:4] {
+				controls[controlID].target = fmt.Sprintf("%s%d", sliderCommandTargetPrefix, index)
+			}
+		}
+	}
 	return &hardwareMutePrototype{
 		logger:    logger.Named("hardware_mute_prototype"),
 		commander: mixr,
 		indicator: mixr.serial,
 		events:    mixr.serial.SubscribeToPrototypeEvents(),
-		refresh: func() {
-			mixr.sessions.refreshSessions(true)
+		refresh: func(reason string) bool {
+			return mixr.sessions.refreshSessionsWithReason(false, reason)
 		},
-		controls: map[string]*prototypeMuteControl{
-			prototypeSpotifyMuteControl:    {target: mixr.config.HardwareMutePrototype.Target},
-			prototypeMasterMuteControl:     {target: masterSessionName},
-			prototypeMicrophoneMuteControl: {target: inputSessionName},
-		},
+		controls:                controls,
+		controlOrder:            controlOrder,
 		poll:                    mixr.config.HardwareMutePrototype.PollInterval,
 		verbose:                 mixr.Verbose(),
 		microphoneLevelInverted: mixr.config.HardwareMutePrototype.MicrophoneLevelInverted,
@@ -73,10 +98,11 @@ func newHardwareMutePrototype(mixr *Mixr, logger *zap.SugaredLogger) *hardwareMu
 
 func (p *hardwareMutePrototype) Start() {
 	p.startOnce.Do(func() {
-		p.logger.Infow("Starting experimental microphone controls integration",
+		p.logger.Infow("Starting experimental hardware mute integration",
 			"spotifyTarget", p.controls[prototypeSpotifyMuteControl].target,
 			"masterTarget", p.controls[prototypeMasterMuteControl].target,
 			"microphoneTarget", p.controls[prototypeMicrophoneMuteControl].target,
+			"controls", p.controlOrder,
 			"pollInterval", p.poll)
 		go p.run()
 	})
@@ -101,7 +127,7 @@ func (p *hardwareMutePrototype) run() {
 		case <-ticker.C:
 			p.syncIndicators(false)
 		case <-p.stop:
-			p.logger.Info("Stopping experimental dual hardware mute integration")
+			p.logger.Info("Stopping experimental hardware mute integration")
 			return
 		}
 	}
@@ -117,8 +143,9 @@ func (p *hardwareMutePrototype) handleEvent(event PrototypeSerialEvent) {
 		p.hasLastMicrophoneLevel = false
 		for _, control := range p.controls {
 			control.hasLastSwitch = false
+			control.hasLastButton = false
 		}
-		p.logger.Info("Prototype firmware ready; synchronizing three indicators from Windows")
+		p.logger.Infow("Prototype firmware ready; synchronizing indicators from Windows", "count", len(p.controlOrder))
 		p.syncIndicatorsLocked(true)
 
 	case PrototypeSerialSwitchEvent:
@@ -137,6 +164,29 @@ func (p *hardwareMutePrototype) handleEvent(event PrototypeSerialEvent) {
 		control.lastSwitchClosed = event.SwitchClosed
 		p.logger.Infow("Accepted debounced mute switch transition",
 			"control", event.ControlID, "target", control.target, "closed", event.SwitchClosed)
+		p.toggleLocked(event.ControlID, control)
+
+	case PrototypeSerialButtonEvent:
+		control, known := p.controls[event.ControlID]
+		if !p.ready || !known {
+			if p.verbose {
+				p.logger.Debugw("Ignoring prototype button event", "ready", p.ready, "event", event)
+			}
+			return
+		}
+		if control.hasLastButton && control.lastButtonPressed == event.ButtonPressed {
+			p.logger.Debugw("Ignoring duplicate stable button state", "control", event.ControlID, "pressed", event.ButtonPressed)
+			return
+		}
+		control.hasLastButton = true
+		control.lastButtonPressed = event.ButtonPressed
+		if !event.ButtonPressed {
+			if p.verbose {
+				p.logger.Debugw("Accepted momentary button release without action", "control", event.ControlID, "target", control.target)
+			}
+			return
+		}
+		p.logger.Infow("Accepted debounced momentary mute press", "control", event.ControlID, "target", control.target)
 		p.toggleLocked(event.ControlID, control)
 
 	case PrototypeSerialAnalogEvent:
@@ -213,7 +263,7 @@ func (p *hardwareMutePrototype) syncIndicatorsLocked(forceRefresh bool) {
 	if !p.ready {
 		return
 	}
-	for _, controlID := range []string{prototypeMasterMuteControl, prototypeSpotifyMuteControl, prototypeMicrophoneMuteControl} {
+	for _, controlID := range p.controlOrder {
 		p.syncIndicatorLocked(controlID, p.controls[controlID], forceRefresh)
 	}
 }
@@ -251,23 +301,21 @@ func (p *hardwareMutePrototype) executeWithRefreshLocked(control *prototypeMuteC
 	return p.executeCommandWithRefreshLocked(control, command, forceRefresh)
 }
 
-func (p *hardwareMutePrototype) executeCommandWithRefreshLocked(control *prototypeMuteControl, command AudioCommand, forceRefresh bool) (AudioCommandResult, error) {
+func (p *hardwareMutePrototype) executeCommandWithRefreshLocked(control *prototypeMuteControl, command AudioCommand, allowRecoveryRefresh bool) (AudioCommandResult, error) {
 	result, err := p.commander.ExecuteAudioCommand(command)
-	if err == nil || p.refresh == nil {
+	if err == nil || p.refresh == nil || !allowRecoveryRefresh {
 		return result, err
 	}
 
-	now := time.Now()
-	if !forceRefresh && control.lastSessionRefresh.Add(prototypeSessionRefreshCooldown).After(now) {
-		return result, err
-	}
-	p.logger.Debugw("Refreshing sessions after audio command failure", "target", control.target, "operation", command.Operation, "error", err)
-	control.lastSessionRefresh = now
+	reason := "explicit-button-target-unavailable"
+	p.logger.Debugw("Requesting bounded recovery refresh after explicit audio command failure",
+		"reason", reason, "target", control.target, "operation", command.Operation, "error", err)
 	// Every refresh replaces the complete session snapshot and may therefore
 	// select a different capture endpoint even when another target triggered
 	// it. The next firmware heartbeat must reapply the absolute A4 position.
-	p.hasLastMicrophoneLevel = false
-	p.refresh()
+	if p.refresh(reason) {
+		p.hasLastMicrophoneLevel = false
+	}
 	return p.commander.ExecuteAudioCommand(command)
 }
 
