@@ -4,6 +4,73 @@ Date: 2026-11-06 (America/Phoenix). Base: verified main `627feec`.
 Branch: `tooling/validation-workflow`, isolated `.worktrees/validation-workflow`.
 The D0 milestone tag and historical qualification reports were not changed.
 
+## Final qualification — 2026-11-06, America/Phoenix
+
+This section supersedes the preparation stop point below: the user's closeout
+request reports the prior soak completed and explicitly authorizes actual
+validation followed by gated merges/pushes. Earlier sections remain historical
+evidence, including the original failed race investigation.
+
+WinCOM was qualified first using the documented live read-only Core Audio
+methods on both architectures, the complete ordinary/build matrix, full amd64
+race suite and focused explicit checkptr regressions. The qualified integration
+merge is `4baef5dda8c03f1a9f2b7ecc9ec619a07e1f3f30`; documentation commit
+`d24bcc2d75c2f0143e8b7d9d730070fa56d94b6f` became main. Both architecture
+suites and amd64 race testing passed again on actual main before push. A remote
+query confirmed main/origin/main at `d24bcc2` after push. See
+[WinCOM qualification](WINCOM_POINTER_LIFETIME.md) for results and native limits.
+
+T0 began at `62a5d7bba51eadbc0fefef3f87e8e0ffcc41cb06`, clean. Merging the
+updated main into T0 with `--no-ff` produced
+`28799e8deb5274a1c2041a029f9f1cba1879742f`, without conflicts or history rewrite.
+The full twelve-file T0 diff was reviewed against the updated main. Production
+Go and application tests, firmware, dependencies, config and protocol match
+main exactly, including both WinCOM corrections and the D0 config-test fix.
+The batch addition only redirects output when `MIXR_BUILD_OUTPUT_DIR` is set.
+
+Actual execution on Windows 25H2 build 26200.9711, Go 1.27.3, PowerShell 7.6.5:
+
+| Gate | Result and retained run under `validation-results/` |
+| --- | --- |
+| `validate.ps1 -Mode quick` | PASS, `20261106-193238-853-458a1685-quick` |
+| `validate.ps1 -Mode full -KeepArtifacts` | PASS, `20261106-193252-166-ec36b552-full` |
+| `validate.ps1 -Mode race` | PASS, `20261106-193320-446-5f701f4f-race` |
+| Tooling self-tests, Windows PowerShell 5.1 | PASS, `tooling-test-0eaa56577dbb41e3a356a3413fcb7b1f` |
+| Tooling self-tests, PowerShell 7.6.5 | PASS, `tooling-test-1db6c236dd974fd58053c0a1c0d056c9` |
+
+The full run executed both 386/amd64 suites and retained all ten real Windows
+binaries in its `artifacts/386` and `artifacts/amd64` directories. `go version
+-m` confirmed every architecture and all four applications' embedded commit
+`28799e8`, version `milestone/five-channel-d0-validated-10-g28799e8`, and dev/release
+type. Metadata captures and SHA256/size manifest remain in ignored
+`.validation/closeout/`. The race compiler was GCC 16.2.0, target
+`x86_64-w64-mingw32`, with a resolved `libsynchronization.a`. CGO and compiler/PATH
+settings were process-local. No data-race warning or checkptr fatal appeared.
+Known module stat-cache access-denied messages were non-fatal build diagnostics.
+
+Self-tests verified plans, unique output directories, cleanup after success and
+failure, preservation of retained artifacts, native/batch/race failure exits,
+compiler prerequisite failures, successful stderr capture, and environment/cwd
+restoration. Their deliberately failed stub runs are orchestration evidence,
+not product failures or real race reports. The initial PowerShell 5.1 invocation
+was blocked by script execution policy before tests started; rerunning both
+hosts with a process-only `-ExecutionPolicy Bypass` passed. No permanent policy
+or environment change was made. All captures are retained locally.
+
+No application/controller was launched by T0. Existing COM5 runtime settings,
+logs, crash captures, release bundles, branches/worktrees and milestone tags
+were preserved. The repository COM4 example and five-channel D0 settings remain
+unchanged. Prior 91m22s soak evidence belongs to release `627feec`, not this
+safety correction. Dynamic foreground hardware qualification, endpoint/USB
+recovery on the new executable, and a new soak remain unverified; foreground
+unavailable warnings, microphone deadband and log-retention follow-ups remain
+deferred. No encoder/routing feature work is included.
+
+The qualified branch is ready for the requested `--no-ff` main merge. Repeat
+Go/tooling checks on actual merged main, retain its final-identity builds, then
+push and verify remote synchronization. Git history and the final closeout
+manifest identify that resulting commit; no milestone tag is created.
+
 ## Safe checks performed during the mainline soak
 
 - Parsed the PowerShell entry point; `git diff --check` passed.

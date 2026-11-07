@@ -97,7 +97,7 @@ procedure, observations and untested cases. During a hardware soak, use only
   context. For new work, start at AGENTS, this guide, and the applicable report;
   do not replay historical command sequences as current setup instructions.
 
-T0 execution evidence and deferred checks are in [T0 tooling review](T0_TOOLING_REVIEW.md).
+T0 execution evidence and physical qualification limits are in [T0 tooling review](T0_TOOLING_REVIEW.md).
 
 To check the wrapper itself without real Go/GCC execution:
 

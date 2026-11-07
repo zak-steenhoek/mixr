@@ -58,5 +58,7 @@ replace physical audio/USB validation or prove the absence of races.
 Use race testing for concurrency, callback ownership, refresh/shutdown changes
 and milestones. Go documents substantial runtime/memory overhead; ordinary
 iterations should use quick tests, then full checks at review/integration.
-T0 did not install GCC or execute this suite; previous D0 race deferrals remain
-unchanged historical evidence.
+T0 did not install GCC. The subsequently installed UCRT64 GCC 16.2.0 passed
+the compatibility probes and full suite during
+[final T0 qualification](T0_TOOLING_REVIEW.md). Previous D0 race deferrals remain
+historical evidence for their recorded commits.
