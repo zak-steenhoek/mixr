@@ -4,6 +4,7 @@ ECHO Building mixr (development)...
 
 REM set repo root in relation to script path to avoid cwd dependency
 SET "MIXR_ROOT=%~dp0..\..\..\.."
+IF NOT DEFINED MIXR_BUILD_OUTPUT_DIR SET "MIXR_BUILD_OUTPUT_DIR=%MIXR_ROOT%"
 
 REM shove git commit, version tag into env
 for /f "delims=" %%a in ('git rev-list -1 --abbrev-commit HEAD') do @set GIT_COMMIT=%%a
@@ -14,7 +15,7 @@ ECHO - gitCommit %GIT_COMMIT%
 ECHO - versionTag %VERSION_TAG%
 ECHO - buildType %BUILD_TYPE%
 
-go build -o "%MIXR_ROOT%\mixr-dev.exe" -ldflags "-X main.gitCommit=%GIT_COMMIT% -X main.versionTag=%VERSION_TAG% -X main.buildType=%BUILD_TYPE%" "%MIXR_ROOT%\pkg\mixr\cmd"
+go build -o "%MIXR_BUILD_OUTPUT_DIR%\mixr-dev.exe" -ldflags "-X main.gitCommit=%GIT_COMMIT% -X main.versionTag=%VERSION_TAG% -X main.buildType=%BUILD_TYPE%" "%MIXR_ROOT%\pkg\mixr\cmd"
 if %ERRORLEVEL% NEQ 0 GOTO BUILDERROR
 ECHO Done.
 GOTO DONE

@@ -187,6 +187,7 @@ With many different 3D-printed designs being added to our [community showcase](.
 
 - V1 development builds are named `mixr-dev.exe`; release builds are named `mixr-release.exe` and packaged as `mixr.exe`.
 - Place the executable and `config.yaml` in the same directory anywhere on your machine.
+- Start mixr with that directory as its working directory (set a shortcut's **Start in** field). Configuration and runtime logs are resolved from the working directory.
 - (Optional, on Windows) Create a shortcut to `mixr.exe` and copy it to `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup` to have mixr run on boot.
 
 ### Building from source
@@ -199,6 +200,9 @@ If you'd rather build from source or modify mixr, clone
 
 The Go module is `github.com/zak-steenhoek/mixr`, and the application package
 is `github.com/zak-steenhoek/mixr/pkg/mixr`.
+
+For repeatable quick/full/race checks with isolated build outputs, see the
+[Windows validation workflow](./docs/VALIDATION_WORKFLOW.md).
 
 If you need any help with this, please [join our Discord server](https://discord.gg/nf88NJu).
 
