@@ -14,7 +14,9 @@ root [AGENTS.md](../AGENTS.md).
    an approved migration explicitly changes them.
 3. Use `internal/wincom` for audited Core Audio calls; do not restore unsafe
    pinned `go-wca` methods.
-4. Run the 386/amd64 commands in `AGENTS.md` from the repository root.
+4. Use the [validation workflow](VALIDATION_WORKFLOW.md): quick tests during
+   iteration, full 386/amd64 checks before integration, and amd64 race tests
+   for concurrency changes and milestones. Defer execution during hardware soaks.
 5. Treat physical Windows/Nano validation as distinct from automated tests and
    record the hardware, Windows/build version, procedure, results, and gaps.
 6. Keep commits focused and avoid unrelated refactors.

@@ -98,20 +98,20 @@ is recorded in [baseline validation](docs/BASELINE_VALIDATION.md),
 
 ## Verification
 
-Run relevant tests for both Windows architectures from the repository root:
+Use the repeatable Windows validation entry point from the repository root:
 
 ```powershell
-foreach ($arch in '386', 'amd64') {
-    $env:GOARCH = $arch
-    go test -count=1 -buildvcs=false ./...
-    cmd /c "call pkg\mixr\scripts\windows\build-dev.bat"
-    cmd /c "call pkg\mixr\scripts\windows\build-release.bat"
-    go build -o "windows-routing-spike-$arch.exe" .\cmd\windows-routing-spike
-    go build -o "windows-audio-control-$arch.exe" .\cmd\windows-audio-control
-    go build -o "windows-microphone-control-$arch.exe" .\cmd\windows-microphone-control
-}
-Remove-Item Env:GOARCH
+.\pkg\mixr\scripts\windows\validate.ps1 -Mode quick # Windows amd64 tests
+.\pkg\mixr\scripts\windows\validate.ps1 -Mode full  # Established 386/amd64 suite
+.\pkg\mixr\scripts\windows\validate.ps1 -Mode race  # amd64, requires GCC/CGO
 ```
+
+See [validation workflow](docs/VALIDATION_WORKFLOW.md) for artifact retention,
+result summaries, safe command previews, and deferred physical checks, and
+[Windows race setup](docs/WINDOWS_RACE_TESTING.md) for compiler prerequisites.
+Use `-Plan` during an active hardware soak; defer actual tests/builds until it
+ends. Use `-KeepArtifacts` to retain application/diagnostic executables with
+version metadata. Automated validation never launches the application or tools.
 
 Follow [docs/WINDOWS_AUDIO_HARDENING.md](docs/WINDOWS_AUDIO_HARDENING.md) for
 known vet diagnostics. Changes affecting USB, serial input, audio sessions,
