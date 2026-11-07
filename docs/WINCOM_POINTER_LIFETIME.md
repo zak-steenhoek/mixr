@@ -165,3 +165,80 @@ read values with Windows, record Windows/build, architecture, devices, active
 applications, procedures/results and untested cases, and verify clean shutdown.
 Do not use the diagnostics' mutation commands for this read-only check. Follow
 the existing physical regression requirements before merge/tag qualification.
+
+## Integration qualification — 2026-11-06
+
+The integration request authorizes the read-only qualification below and gated
+integration of this safety fix, followed by T0. The earlier investigation and
+its limitations above remain historical evidence.
+
+Reviewed main `edd16d6bced7f188430a9803833c730d78e57369` against fix
+`ce7d080f03cba93c3f9cb2a398a55420d35d13d9`, including parent fixture correction
+`97a9f250445028a02a23f16fdd60d6974d848157`. Only the WinCOM boundary, its
+session-volume caller, regression fixtures, and investigation reports differ.
+Configuration, firmware, dependencies and protocol are unchanged. Local and
+remote main agreed; both fix and T0 worktrees were clean before qualification.
+
+### Live read-only Core Audio
+
+Windows 25H2 build 26200.9711, Go 1.27.3 windows/amd64. Newly built **386 and
+amd64** diagnostic executables from `ce7d080` exercised the documented methods:
+`routing-spike list/default/sessions`, `audio-control current-volume/current-mute`
+for `master`, `chrome.exe`, and `spotify.exe`, and `microphone-control current`.
+Five complete read cycles per architecture passed. Each architecture also ran
+`microphone-control watch --interval 100ms --samples 100`, with process resource
+samples every 500ms. Every checked process exited zero, with no native crash,
+access violation, or shutdown warning. No volume, mute, route, hardware or
+application state was changed by the qualification commands.
+
+Playback defaults: Speakers (Realtek(R) Audio), console/multimedia ID suffix
+`b161a7f4-3a85-4399-bbee-9eaf5d947a2d`; Realtek HD Audio 2nd output,
+communications suffix `3a66bf09-fed7-4d59-8132-4b0ade73df37`. Capture default:
+Microphone (Realtek(R) Audio), suffix `57e89eab-f32f-4baa-bf2d-fdf396af2dce`.
+Session enumeration found Chrome, Spotify, Discord, Steam and Wallpaper Engine.
+Windows Sound/mixer UI independently matched master 48%, Chrome 100%, Spotify's
+two sessions at 50% and 45%, microphone 100%, and unmuted controls.
+
+After the first three startup resource samples, 386 working set ranged
+14,020,608–14,106,624 bytes, private bytes 4,259,840–4,354,048, handles 282–283;
+amd64 working set 14,233,600–14,331,904 bytes, private bytes
+13,680,640–13,791,232, handles 259. These short observations show no abrupt
+resource growth; they are not a leak proof or soak qualification.
+
+The restricted execution sandbox initially denied playback-session activation;
+the same binaries and read-only commands succeeded under normal desktop access.
+This environment restriction is distinct from a native COM regression. Captures
+and resource CSVs remain in the original fix worktree at ignored
+`.validation/closeout-20261106/`.
+
+No endpoint switch or intentional session recreation was induced, and no
+USB/Nano, analog, button/LED or new audio soak regression was performed. Prior
+D0 physical/soak evidence remains applicable only to its recorded commits;
+these checks do not certify physical routing or all pinned COM wrappers.
+
+### Integration automated gate
+
+Isolated `track-d/wincom-safety-integration` merged the complete fix history
+with `--no-ff`, producing `4baef5dda8c03f1a9f2b7ecc9ec619a07e1f3f30`.
+On that tree, full ordinary Windows 386/amd64 suites passed, as did both dev
+and release scripts and routing/audio/microphone diagnostic builds (ten total).
+The full amd64 `go test -race -count=1 -buildvcs=false ./...` passed with CGO
+enabled and the session-local UCRT64 compiler/PATH. Explicit race plus
+`-gcflags=all=-d=checkptr=1` DeviceID/mute/forced-growth regressions passed.
+Full suites include callback registration, transition reuse and 10,000-lookup
+guards. No data-race warning or checkptr fatal appeared. Captures and binaries
+remain in the integration worktree's ignored `.validation/phase-a/`.
+
+Full `go vet ./...` was also run on both architectures and compared with
+unchanged baseline main. Existing routing-spike/session-finder unsafe-pointer
+warnings and `util.go:43` unbuffered signal-channel warning remain. The typed
+fixtures remove the old output-pointer reconstruction warnings; native
+CoTaskMem allocation conversions still warn (now lines 79/81). This is not a
+clean vet pass. The known module stat-cache access-denied build messages were
+non-fatal; every required build exited zero. No suppression was added.
+
+The five-channel D0 repository configuration remains byte-for-byte unchanged,
+including COM4 example, 9600 baud, master/Spotify/Chrome/Discord mapping,
+separate A4 microphone, momentary mode, follow-slider mapping, 500ms polling,
+and deadband 12. Machine-specific COM5 release configurations, existing logs,
+release evidence and milestone tags remain untouched.
