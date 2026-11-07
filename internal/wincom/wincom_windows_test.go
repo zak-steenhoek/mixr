@@ -14,9 +14,11 @@ import (
 )
 
 var (
+	fakeActivationDevice *wca.IMMDevice
+	fakeActivationIID    *ole.GUID
 	fakeActivationCtx    uintptr
-	fakeActivationParams uintptr
-	fakeActivationResult uintptr
+	fakeActivationParams *wca.PROPVARIANT
+	fakeActivationResult unsafe.Pointer
 	fakeEndpointID       uintptr
 	fakeSimpleVolume     float32
 	fakeEndpointVolume   float32
@@ -26,9 +28,11 @@ var (
 )
 
 func TestActivateUsesNativeSignature(t *testing.T) {
+	fakeActivationDevice = nil
+	fakeActivationIID = nil
 	fakeActivationCtx = 0
-	fakeActivationParams = 0
-	fakeActivationResult = 0x1234
+	fakeActivationParams = nil
+	fakeActivationResult = unsafe.Pointer(&wca.IAudioSessionManager2{})
 
 	vtable := &wca.IMMDeviceVtbl{}
 	vtable.Activate = syscall.NewCallback(fakeActivate)
@@ -39,14 +43,20 @@ func TestActivateUsesNativeSignature(t *testing.T) {
 	if err := Activate(device, wca.IID_IAudioSessionManager2, wca.CLSCTX_ALL, params, &result); err != nil {
 		t.Fatal(err)
 	}
+	if fakeActivationDevice != device {
+		t.Fatalf("activation device = %p, want %p", fakeActivationDevice, device)
+	}
+	if fakeActivationIID != wca.IID_IAudioSessionManager2 {
+		t.Fatalf("activation IID = %p, want %p", fakeActivationIID, wca.IID_IAudioSessionManager2)
+	}
 	if fakeActivationCtx != uintptr(wca.CLSCTX_ALL) {
 		t.Fatalf("activation context = %#x, want %#x", fakeActivationCtx, uintptr(wca.CLSCTX_ALL))
 	}
-	if fakeActivationParams != uintptr(unsafe.Pointer(params)) {
-		t.Fatalf("activation parameters = %#x, want %#x", fakeActivationParams, uintptr(unsafe.Pointer(params)))
+	if fakeActivationParams != params {
+		t.Fatalf("activation parameters = %p, want %p", fakeActivationParams, params)
 	}
-	if uintptr(result) != fakeActivationResult {
-		t.Fatalf("activation result = %#x, want %#x", uintptr(result), fakeActivationResult)
+	if result != fakeActivationResult {
+		t.Fatalf("activation result = %p, want %p", result, fakeActivationResult)
 	}
 }
 
@@ -216,20 +226,25 @@ func TestUnregisterEndpointNotificationCallbackUsesVTableSlot(t *testing.T) {
 	}
 }
 
-func fakeActivate(_, _, ctx, params, out uintptr) uintptr {
+// Native pointer arguments stay pointers across the callback boundary. Receiving
+// them as uintptr and converting back loses the provenance required by checkptr.
+// These pointer-sized arguments preserve the stdcall/fastcall ABI on 386/amd64.
+func fakeActivate(device *wca.IMMDevice, iid *ole.GUID, ctx uintptr, params *wca.PROPVARIANT, out *unsafe.Pointer) uintptr {
+	fakeActivationDevice = device
+	fakeActivationIID = iid
 	fakeActivationCtx = ctx
 	fakeActivationParams = params
-	*(*uintptr)(unsafe.Pointer(out)) = fakeActivationResult
+	*out = fakeActivationResult
 	return 0
 }
 
-func fakeGetID(_, out uintptr) uintptr {
-	*(*uintptr)(unsafe.Pointer(out)) = fakeEndpointID
+func fakeGetID(_ uintptr, out *uintptr) uintptr {
+	*out = fakeEndpointID
 	return 0
 }
 
-func fakeGetCount(_, out uintptr) uintptr {
-	*(*int32)(unsafe.Pointer(out)) = 7
+func fakeGetCount(_ uintptr, out *int32) uintptr {
+	*out = 7
 	return 0
 }
 
@@ -238,8 +253,8 @@ func fakeSetSimpleVolume(_, level, _ uintptr) uintptr {
 	return 0
 }
 
-func fakeGetSimpleVolume(_, out uintptr) uintptr {
-	*(*float32)(unsafe.Pointer(out)) = 0.37
+func fakeGetSimpleVolume(_ uintptr, out *float32) uintptr {
+	*out = 0.37
 	return 0
 }
 
@@ -248,13 +263,13 @@ func fakeSetEndpointVolume(_, level, _ uintptr) uintptr {
 	return 0
 }
 
-func fakeGetEndpointVolume(_, out uintptr) uintptr {
-	*(*float32)(unsafe.Pointer(out)) = 0.73
+func fakeGetEndpointVolume(_ uintptr, out *float32) uintptr {
+	*out = 0.73
 	return 0
 }
 
-func fakeGetMute(_, out uintptr) uintptr {
-	*(*int32)(unsafe.Pointer(out)) = -1
+func fakeGetMute(_ uintptr, out *int32) uintptr {
+	*out = -1
 	return 0
 }
 
