@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -26,6 +27,7 @@ type wcaSessionFinder struct {
 	lastDefaultDeviceChange time.Time
 
 	// our master input and output sessions
+	masterMu  sync.RWMutex
 	masterOut *masterSession
 	masterIn  *masterSession
 }
@@ -43,7 +45,7 @@ const (
 	deviceSessionFormat = "device.%s"
 )
 
-func newSessionFinder(logger *zap.SugaredLogger) (SessionFinder, error) {
+func newWCASessionFinder(logger *zap.SugaredLogger) (*wcaSessionFinder, error) {
 	sf := &wcaSessionFinder{
 		logger:        logger.Named("session_finder"),
 		sessionLogger: logger.Named("sessions"),
@@ -57,38 +59,6 @@ func newSessionFinder(logger *zap.SugaredLogger) (SessionFinder, error) {
 
 func (sf *wcaSessionFinder) GetAllSessions() ([]Session, error) {
 	sessions := []Session{}
-
-	// we must call this every time we're about to list devices, i think. could be wrong
-	if err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED); err != nil {
-
-		// if the error is "Incorrect function" that corresponds to 0x00000001,
-		// which represents E_FALSE in COM error handling. this is fine for this function,
-		// and just means that the call was redundant.
-		const eFalse = 1
-		oleError := &ole.OleError{}
-
-		if errors.As(err, &oleError) {
-			if oleError.Code() == eFalse {
-				sf.logger.Warn("CoInitializeEx failed with E_FALSE due to redundant invocation")
-			} else {
-				sf.logger.Warnw("Failed to call CoInitializeEx",
-					"isOleError", true,
-					"error", err,
-					"oleError", oleError)
-
-				return nil, fmt.Errorf("call CoInitializeEx: %w", err)
-			}
-		} else {
-			sf.logger.Warnw("Failed to call CoInitializeEx",
-				"isOleError", false,
-				"error", err,
-				"oleError", nil)
-
-			return nil, fmt.Errorf("call CoInitializeEx: %w", err)
-		}
-
-	}
-	defer ole.CoUninitialize()
 
 	// ensure we have a device enumerator
 	if err := sf.getDeviceEnumerator(); err != nil {
@@ -119,23 +89,33 @@ func (sf *wcaSessionFinder) GetAllSessions() ([]Session, error) {
 	}
 
 	// get the master output session
-	sf.masterOut, err = sf.getMasterSession(defaultOutputEndpoint, masterSessionName, masterSessionName)
+	masterOut, err := sf.getMasterSession(defaultOutputEndpoint, masterSessionName, masterSessionName)
 	if err != nil {
 		sf.logger.Warnw("Failed to get master audio output session", "error", err)
 		return nil, fmt.Errorf("get master audio output session: %w", err)
 	}
 
-	sessions = append(sessions, sf.masterOut)
+	sf.masterMu.Lock()
+	sf.masterOut = masterOut
+	sf.masterMu.Unlock()
+	sessions = append(sessions, masterOut)
 
 	// get the master input session, if a default input device exists
 	if defaultInputEndpoint != nil {
-		sf.masterIn, err = sf.getMasterSession(defaultInputEndpoint, inputSessionName, inputSessionName)
-		if err != nil {
-			sf.logger.Warnw("Failed to get master audio input session", "error", err)
-			return nil, fmt.Errorf("get master audio input session: %w", err)
+		masterIn, masterErr := sf.getMasterSession(defaultInputEndpoint, inputSessionName, inputSessionName)
+		if masterErr != nil {
+			sf.logger.Warnw("Failed to get master audio input session", "error", masterErr)
+			return nil, fmt.Errorf("get master audio input session: %w", masterErr)
 		}
 
-		sessions = append(sessions, sf.masterIn)
+		sf.masterMu.Lock()
+		sf.masterIn = masterIn
+		sf.masterMu.Unlock()
+		sessions = append(sessions, masterIn)
+	} else {
+		sf.masterMu.Lock()
+		sf.masterIn = nil
+		sf.masterMu.Unlock()
 	}
 
 	// enumerate all devices and make their "master" sessions bindable by friendly name;
@@ -523,20 +503,23 @@ func (sf *wcaSessionFinder) defaultDeviceChangedCallback(
 
 	// filter out calls that happen in rapid succession
 	now := time.Now()
-
+	sf.masterMu.Lock()
 	if sf.lastDefaultDeviceChange.Add(minDefaultDeviceChangeThreshold).After(now) {
+		sf.masterMu.Unlock()
 		return
 	}
-
 	sf.lastDefaultDeviceChange = now
+	masterOut := sf.masterOut
+	masterIn := sf.masterIn
+	sf.masterMu.Unlock()
 
 	sf.logger.Debug("Default audio device changed, marking master sessions as stale")
-	if sf.masterOut != nil {
-		sf.masterOut.markAsStale()
+	if masterOut != nil {
+		masterOut.markAsStale()
 	}
 
-	if sf.masterIn != nil {
-		sf.masterIn.markAsStale()
+	if masterIn != nil {
+		masterIn.markAsStale()
 	}
 
 	return

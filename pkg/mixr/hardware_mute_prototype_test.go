@@ -59,9 +59,89 @@ func TestHardwareMutePrototypeControlsAreIndependentAndDeduplicated(t *testing.T
 	}
 }
 
+func TestFiveChannelMomentaryButtonsToggleOnlyOnDistinctPresses(t *testing.T) {
+	commander := newFakePrototypeCommander()
+	prototype := testHardwareMutePrototype(commander, &fakePrototypeIndicator{})
+	controlTargets := map[string]string{
+		prototypeMasterMuteControl:     masterSessionName,
+		prototypeSpotifyMuteControl:    "spotify.exe",
+		prototypeChromeMuteControl:     "chrome.exe",
+		prototypeForegroundMuteControl: "deej.current",
+		prototypeMicrophoneMuteControl: inputSessionName,
+	}
+
+	for controlID := range controlTargets {
+		prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: controlID, ButtonPressed: true})
+	}
+	if commander.totalToggles() != 0 {
+		t.Fatalf("pre-ready momentary toggles = %d, want 0", commander.totalToggles())
+	}
+
+	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialReady})
+	for controlID, target := range controlTargets {
+		prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: controlID, ButtonPressed: true})
+		prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: controlID, ButtonPressed: true})
+		prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: controlID})
+		prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: controlID})
+		prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: controlID, ButtonPressed: true})
+		if got := commander.toggleCount[target]; got != 2 {
+			t.Fatalf("%s toggle count = %d, want press/release/press to toggle twice", controlID, got)
+		}
+	}
+}
+
+func TestFiveChannelConfigurationMapsPhysicalControlIdentities(t *testing.T) {
+	config := &CanonicalConfig{}
+	config.HardwareMutePrototype.Target = "spotify-custom.exe"
+	config.HardwareMutePrototype.ChromeTarget = "chrome-custom.exe"
+	config.HardwareMutePrototype.ForegroundTarget = "deej.current"
+	config.HardwareMutePrototype.FiveChannelMomentary = true
+	config.HardwareMutePrototype.PollInterval = 500 * time.Millisecond
+	mixr := &Mixr{config: config, serial: &SerialIO{}}
+	prototype := newHardwareMutePrototype(mixr, zap.NewNop().Sugar())
+
+	wantTargets := map[string]string{
+		prototypeMasterMuteControl:     masterSessionName,
+		prototypeSpotifyMuteControl:    "spotify-custom.exe",
+		prototypeChromeMuteControl:     "chrome-custom.exe",
+		prototypeForegroundMuteControl: "deej.current",
+		prototypeMicrophoneMuteControl: inputSessionName,
+	}
+	if len(prototype.controls) != len(wantTargets) {
+		t.Fatalf("control count = %d, want %d", len(prototype.controls), len(wantTargets))
+	}
+	for controlID, target := range wantTargets {
+		control, ok := prototype.controls[controlID]
+		if !ok || control.target != target {
+			t.Errorf("control %q = %#v, want target %q", controlID, control, target)
+		}
+	}
+}
+
+func TestMomentaryReconnectReleaseRearmsWithoutToggling(t *testing.T) {
+	commander := newFakePrototypeCommander()
+	prototype := testHardwareMutePrototype(commander, &fakePrototypeIndicator{})
+	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialReady})
+	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: prototypeMasterMuteControl, ButtonPressed: true})
+	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialReady})
+
+	// Firmware baselines a held button during hello and emits nothing. Its first
+	// later transition is the release, which must never act.
+	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: prototypeMasterMuteControl})
+	if got := commander.toggleCount[masterSessionName]; got != 1 {
+		t.Fatalf("toggle count after reconnect release = %d, want 1", got)
+	}
+	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: prototypeMasterMuteControl, ButtonPressed: true})
+	if got := commander.toggleCount[masterSessionName]; got != 2 {
+		t.Fatalf("toggle count after next press = %d, want 2", got)
+	}
+}
+
 func TestHardwareMutePrototypeSynchronizesIndicatorsIndependently(t *testing.T) {
 	commander := newFakePrototypeCommander()
 	commander.states["spotify.exe"] = AggregateMuteMixed
+	commander.states["chrome.exe"] = AggregateMuteMixed
+	commander.states["deej.current"] = AggregateMuteAllMuted
 	commander.states[masterSessionName] = AggregateMuteAllMuted
 	commander.states[inputSessionName] = AggregateMuteAllMuted
 	indicator := &fakePrototypeIndicator{}
@@ -77,6 +157,12 @@ func TestHardwareMutePrototypeSynchronizesIndicatorsIndependently(t *testing.T) 
 	if !indicator.last(prototypeMicrophoneMuteControl) {
 		t.Fatal("muted microphone indicator = off, want on")
 	}
+	if indicator.last(prototypeChromeMuteControl) {
+		t.Fatal("mixed Chrome indicator = on, want off")
+	}
+	if !indicator.last(prototypeForegroundMuteControl) {
+		t.Fatal("muted foreground indicator = off, want on")
+	}
 	prototype.handleEvent(PrototypeSerialEvent{
 		Kind: PrototypeSerialSwitchEvent, ControlID: prototypeSpotifyMuteControl, SwitchClosed: true,
 	})
@@ -88,6 +174,8 @@ func TestHardwareMutePrototypeSynchronizesIndicatorsIndependently(t *testing.T) 
 	commander.states["spotify.exe"] = AggregateMuteAllMuted
 	commander.states[masterSessionName] = AggregateMuteAllUnmuted
 	commander.states[inputSessionName] = AggregateMuteAllUnmuted
+	commander.states["chrome.exe"] = AggregateMuteAllMuted
+	commander.states["deej.current"] = AggregateMuteAllUnmuted
 	prototype.syncIndicators(false)
 	if !indicator.last(prototypeSpotifyMuteControl) {
 		t.Fatal("externally muted Spotify indicator = off, want on")
@@ -97,6 +185,12 @@ func TestHardwareMutePrototypeSynchronizesIndicatorsIndependently(t *testing.T) 
 	}
 	if indicator.last(prototypeMicrophoneMuteControl) {
 		t.Fatal("externally unmuted microphone indicator = on, want off")
+	}
+	if !indicator.last(prototypeChromeMuteControl) {
+		t.Fatal("externally muted Chrome indicator = off, want on")
+	}
+	if indicator.last(prototypeForegroundMuteControl) {
+		t.Fatal("externally unmuted foreground indicator = on, want off")
 	}
 }
 
@@ -111,23 +205,18 @@ func TestHardwareMutePrototypeRefreshesSpotifyAndChangedDefaultEndpoint(t *testi
 	indicator := &fakePrototypeIndicator{}
 	prototype := testHardwareMutePrototype(commander, indicator)
 	refreshes := 0
-	prototype.refresh = func() {
+	prototype.refresh = func(reason string) bool {
 		refreshes++
-		if refreshes == 1 {
-			// Simulate rediscovery of a newly selected default endpoint.
-			commander.unavailable[masterSessionName] = false
-		}
-		if refreshes == 2 {
-			commander.unavailable["spotify.exe"] = false
-		}
-		if refreshes == 3 {
-			commander.unavailable[inputSessionName] = false
-		}
+		// One complete discovery can recover every target in the snapshot.
+		commander.unavailable[masterSessionName] = false
+		commander.unavailable["spotify.exe"] = false
+		commander.unavailable[inputSessionName] = false
+		return true
 	}
 
 	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialReady})
-	if refreshes != 3 {
-		t.Fatalf("refresh count = %d, want one independent refresh per unavailable target", refreshes)
+	if refreshes != 1 {
+		t.Fatalf("refresh count = %d, want one global refresh for unavailable targets", refreshes)
 	}
 	if !indicator.last(prototypeSpotifyMuteControl) || !indicator.last(prototypeMasterMuteControl) || !indicator.last(prototypeMicrophoneMuteControl) {
 		t.Fatalf("indicators after rediscovery: Spotify=%t master=%t microphone=%t, want all on",
@@ -140,7 +229,7 @@ func TestHardwareMutePrototypeMissingEndpointFailsSafe(t *testing.T) {
 	commander.unavailable[masterSessionName] = true
 	indicator := &fakePrototypeIndicator{}
 	prototype := testHardwareMutePrototype(commander, indicator)
-	prototype.refresh = func() {}
+	prototype.refresh = func(reason string) bool { return true }
 
 	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialReady})
 	if indicator.last(prototypeMasterMuteControl) {
@@ -155,6 +244,49 @@ func TestHardwareMutePrototypeMissingEndpointFailsSafe(t *testing.T) {
 	}
 	if indicator.last(prototypeMasterMuteControl) {
 		t.Fatal("failed endpoint toggle left indicator on")
+	}
+}
+
+func TestHardwareMutePrototypePollingMissingTargetsDoesNotRefresh(t *testing.T) {
+	commander := newFakePrototypeCommander()
+	commander.unavailable["spotify.exe"] = true
+	commander.unavailable["chrome.exe"] = true
+	commander.unavailable["deej.current"] = true
+	prototype := testHardwareMutePrototype(commander, &fakePrototypeIndicator{})
+	prototype.ready = true
+	refreshes := 0
+	prototype.refresh = func(reason string) bool {
+		refreshes++
+		return true
+	}
+
+	for i := 0; i < 40; i++ {
+		prototype.syncIndicators(false)
+	}
+	if refreshes != 0 {
+		t.Fatalf("poll-driven refreshes = %d, want 0", refreshes)
+	}
+}
+
+func TestHardwareMutePrototypeButtonGetsOneRecoveryAttempt(t *testing.T) {
+	commander := newFakePrototypeCommander()
+	commander.unavailable["chrome.exe"] = true
+	prototype := testHardwareMutePrototype(commander, &fakePrototypeIndicator{})
+	prototype.ready = true
+	refreshes := 0
+	prototype.refresh = func(reason string) bool {
+		refreshes++
+		commander.unavailable["chrome.exe"] = false
+		return true
+	}
+
+	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: prototypeChromeMuteControl, ButtonPressed: true})
+	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialButtonEvent, ControlID: prototypeChromeMuteControl, ButtonPressed: true})
+	if refreshes != 1 {
+		t.Fatalf("button recovery refreshes = %d, want 1", refreshes)
+	}
+	if commander.toggleCount["chrome.exe"] != 1 {
+		t.Fatalf("successful toggles = %d, want 1", commander.toggleCount["chrome.exe"])
 	}
 }
 
@@ -224,7 +356,10 @@ func TestHardwareMutePrototypeReappliesLevelAfterMicrophoneRediscovery(t *testin
 	// Any full session refresh can replace the capture endpoint, even when a
 	// different target detected staleness first.
 	commander.unavailable[masterSessionName] = true
-	prototype.refresh = func() { commander.unavailable[masterSessionName] = false }
+	prototype.refresh = func(reason string) bool {
+		commander.unavailable[masterSessionName] = false
+		return true
+	}
 	prototype.syncIndicators(true)
 	prototype.handleEvent(PrototypeSerialEvent{Kind: PrototypeSerialAnalogEvent, ControlID: prototypeMicrophoneLevelControl, AnalogValue: 512})
 	if commander.volumeWrites[inputSessionName] != 2 {
@@ -240,7 +375,16 @@ func testHardwareMutePrototype(commander AudioCommander, indicator prototypeIndi
 		controls: map[string]*prototypeMuteControl{
 			prototypeSpotifyMuteControl:    {target: "spotify.exe"},
 			prototypeMasterMuteControl:     {target: masterSessionName},
+			prototypeChromeMuteControl:     {target: "chrome.exe"},
+			prototypeForegroundMuteControl: {target: "deej.current"},
 			prototypeMicrophoneMuteControl: {target: inputSessionName},
+		},
+		controlOrder: []string{
+			prototypeMasterMuteControl,
+			prototypeSpotifyMuteControl,
+			prototypeChromeMuteControl,
+			prototypeForegroundMuteControl,
+			prototypeMicrophoneMuteControl,
 		},
 		poll:                    500 * time.Millisecond,
 		microphoneLevelDeadband: 12,
@@ -261,11 +405,15 @@ func newFakePrototypeCommander() *fakePrototypeCommander {
 	return &fakePrototypeCommander{
 		states: map[string]AggregateMuteState{
 			"spotify.exe":     AggregateMuteAllUnmuted,
+			"chrome.exe":      AggregateMuteAllUnmuted,
+			"deej.current":    AggregateMuteAllUnmuted,
 			masterSessionName: AggregateMuteAllUnmuted,
 			inputSessionName:  AggregateMuteAllUnmuted,
 		},
 		sessionCount: map[string]int{
 			"spotify.exe":     2,
+			"chrome.exe":      3,
+			"deej.current":    2,
 			masterSessionName: 1,
 			inputSessionName:  1,
 		},

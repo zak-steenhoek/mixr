@@ -86,7 +86,7 @@ func executeAudioCommand(sessions []audioCommandSession, command AudioCommand) (
 		if math.IsNaN(float64(command.Volume)) || math.IsInf(float64(command.Volume), 0) {
 			return result, fmt.Errorf("absolute volume must be finite")
 		}
-		var failures []string
+		var failures []error
 		level := clampVolume(command.Volume)
 		for index, session := range sessions {
 			if err := session.SetVolume(level); err != nil {
@@ -107,7 +107,7 @@ func executeAudioCommand(sessions []audioCommandSession, command AudioCommand) (
 		if command.Increment <= 0 || command.Increment > 1 || math.IsNaN(float64(command.Increment)) || math.IsInf(float64(command.Increment), 0) {
 			return result, fmt.Errorf("relative volume increment must be greater than 0 and at most 1")
 		}
-		var failures []string
+		var failures []error
 		for index, session := range sessions {
 			current, err := session.CurrentVolume()
 			if err != nil {
@@ -130,7 +130,7 @@ func executeAudioCommand(sessions []audioCommandSession, command AudioCommand) (
 		return result, combinedCommandError(failures)
 
 	case AudioCommandCurrentVolume:
-		var failures []string
+		var failures []error
 		for index, session := range sessions {
 			current, err := session.CurrentVolume()
 			if err != nil {
@@ -155,7 +155,7 @@ func executeAudioCommand(sessions []audioCommandSession, command AudioCommand) (
 		for index, session := range sessions {
 			muted, err := session.CurrentMute()
 			if err != nil {
-				return result, fmt.Errorf("%s", sessionFailure(index, session, "read mute before toggle", err))
+				return result, sessionFailure(index, session, "read mute before toggle", err)
 			}
 			allMuted = allMuted && muted
 		}
@@ -171,7 +171,7 @@ func executeAudioCommand(sessions []audioCommandSession, command AudioCommand) (
 
 func setAndReadMute(sessions []audioCommandSession, command AudioCommand, muted bool) (AudioCommandResult, error) {
 	result := AudioCommandResult{Target: command.Target}
-	var failures []string
+	var failures []error
 	for index, session := range sessions {
 		if err := session.SetMute(muted); err != nil {
 			failures = append(failures, sessionFailure(index, session, "set mute", err))
@@ -180,7 +180,7 @@ func setAndReadMute(sessions []audioCommandSession, command AudioCommand, muted 
 
 	readback, err := readMuteStates(sessions, command)
 	if err != nil {
-		failures = append(failures, err.Error())
+		failures = append(failures, err)
 	}
 	result = readback
 	return result, combinedCommandError(failures)
@@ -188,7 +188,7 @@ func setAndReadMute(sessions []audioCommandSession, command AudioCommand, muted 
 
 func readMuteStates(sessions []audioCommandSession, command AudioCommand) (AudioCommandResult, error) {
 	result := AudioCommandResult{Target: command.Target}
-	var failures []string
+	var failures []error
 	mutedCount := 0
 	for index, session := range sessions {
 		muted, err := session.CurrentMute()
@@ -239,13 +239,25 @@ func volumesAreMixed(states []AudioVolumeState) bool {
 	return false
 }
 
-func sessionFailure(index int, session audioCommandSession, action string, err error) string {
-	return fmt.Sprintf("session %d (%s): %s: %v", index+1, session.Key(), action, err)
+func sessionFailure(index int, session audioCommandSession, action string, err error) error {
+	return fmt.Errorf("session %d (%s): %s: %w", index+1, session.Key(), action, err)
 }
 
-func combinedCommandError(failures []string) error {
+func combinedCommandError(failures []error) error {
 	if len(failures) == 0 {
 		return nil
 	}
-	return fmt.Errorf("audio command failed: %s", strings.Join(failures, "; "))
+	return audioCommandError{failures: failures}
 }
+
+type audioCommandError struct{ failures []error }
+
+func (e audioCommandError) Error() string {
+	messages := make([]string, 0, len(e.failures))
+	for _, failure := range e.failures {
+		messages = append(messages, failure.Error())
+	}
+	return fmt.Sprintf("audio command failed: %s", strings.Join(messages, "; "))
+}
+
+func (e audioCommandError) Unwrap() []error { return e.failures }

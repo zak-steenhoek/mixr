@@ -7,6 +7,8 @@ import (
 	"github.com/zak-steenhoek/mixr/pkg/mixr/util"
 )
 
+var currentWindowProcessNames = util.GetCurrentWindowProcessNames
+
 func resolveAudioTargetNames(target string, unmappedSessions []Session) []string {
 	target = strings.ToLower(target)
 	if !strings.HasPrefix(target, specialTargetTransformPrefix) {
@@ -18,14 +20,14 @@ func resolveAudioTargetNames(target string, unmappedSessions []Session) []string
 func resolveSpecialAudioTarget(specialTargetName string, unmappedSessions []Session) []string {
 	switch specialTargetName {
 	case specialTargetCurrentWindow:
-		currentWindowProcessNames, err := util.GetCurrentWindowProcessNames()
+		processNames, err := currentWindowProcessNames()
 		if err != nil {
 			return nil
 		}
-		for index, target := range currentWindowProcessNames {
-			currentWindowProcessNames[index] = strings.ToLower(target)
+		for index, target := range processNames {
+			processNames[index] = strings.ToLower(target)
 		}
-		return funk.UniqString(currentWindowProcessNames)
+		return funk.UniqString(processNames)
 
 	case specialTargetAllUnmapped:
 		targetKeys := make([]string, len(unmappedSessions))
