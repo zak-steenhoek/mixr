@@ -46,9 +46,11 @@ mutes every session. Track B1 reads actual state and uses audited 32-bit Windows
 `BOOL` bindings; see [relative volume and mute](RELATIVE_VOLUME_MUTE.md).
 **Limitations.** Indicator technology and asynchronous external-change
 notification details remain unresolved for VFinal. Track D0 implements an
-experimental five-channel analog prototype using additive `mixr:v1` momentary
-button events and polling-based indicator readback; this is not yet the final
-six-channel protocol or physically validated production behavior.
+five-channel analog prototype using additive `mixr:v1` momentary button events
+and polling-based indicator readback. Its channel/LED and soak behavior was
+reported physically passed at `5b955d1`; dynamic foreground switching remains
+deferred. See [D0 integration](D0_INTEGRATION.md). This is not the final
+six-channel protocol or production hardware.
 
 ## D-004 — Default-endpoint master (Accepted)
 
@@ -108,7 +110,7 @@ legacy dependency methods.
 
 **Rationale.** The audit found pointer-width, `HRESULT`, `BOOL`, output-width,
 callback, and lifetime defects. **Consequences.** New COM calls require explicit
-ABI review and tests on 386 and amd64. The isolated D0 stability fix places
+ABI review and tests on 386 and amd64. The integrated D0 stability fix places
 discovery, retained session operations, release, and apartment shutdown on one
 dedicated OS-thread owner; see
 [Track D0 runtime stability](D0_RUNTIME_STABILITY.md). **Limitations.** The
@@ -143,5 +145,8 @@ working volume knob to accompany an unrelated mute button/LED. **Consequences.**
 Application lists and special targets use the existing resolution semantics;
 successful config reloads retarget actions and LED reads together, without
 mutating mute state. **Limitations.** Mode changes require restart, the feature
-is opt-in to preserve older configurations/firmware, and physical testing is
-still required. This does not implement the planned six-encoder architecture.
+is opt-in to preserve older configurations/firmware. User-reported physical
+tests passed with Discord on channel four; dynamic foreground switching and
+final mainline qualification remain deferred as recorded in
+[D0 integration](D0_INTEGRATION.md). This does not implement the planned
+six-encoder architecture.

@@ -1,5 +1,9 @@
 # Track D0 runtime stability fix
 
+> Historical stage report. Current integration, user-reported physical results,
+> and validation deferrals are consolidated in [D0 integration](D0_INTEGRATION.md).
+
+
 ## Status and scope
 
 This isolated fix branch starts at Track D0 commit

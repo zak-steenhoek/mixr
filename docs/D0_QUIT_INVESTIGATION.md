@@ -1,5 +1,9 @@
 # D0 quit investigation — 2026-11-06
 
+> Historical stage report. Current integration, user-reported physical results,
+> and validation deferrals are consolidated in [D0 integration](D0_INTEGRATION.md).
+
+
 ## Finding and confidence
 
 A foreground-window lookup leak independently survives bf04c6e. Each uncached

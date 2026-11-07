@@ -1,5 +1,9 @@
 # Experimental five-channel momentary mute
 
+> Historical stage report. Current integration, user-reported physical results,
+> and validation deferrals are consolidated in [D0 integration](D0_INTEGRATION.md).
+
+
 ## Status and scope
 
 Track D0 is an isolated experiment based on `main` commit

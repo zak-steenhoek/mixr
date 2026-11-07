@@ -1,5 +1,9 @@
 # D0 permanent callback regression guard
 
+> Historical stage report. Current integration, user-reported physical results,
+> and validation deferrals are consolidated in [D0 integration](D0_INTEGRATION.md).
+
+
 ## Scope and provenance
 
 This test-only follow-up starts at D0 candidate `5b955d1` on

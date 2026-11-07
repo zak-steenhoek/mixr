@@ -36,6 +36,9 @@ hardware_mute_prototype:
   # Enable only with the five-channel momentary prototype sketch. Older
   # three-mute firmware remains supported when this is false.
   five_channel_momentary: false
+  # In five-channel mode, opt in so A0-A3 buttons/LEDs follow slider_mapping.
+  # A4 remains the separate default-microphone channel. Restart to change mode.
+  follow_slider_mapping: false
   chrome_target: chrome.exe
   foreground_target: deej.current
   poll_interval_ms: 500
