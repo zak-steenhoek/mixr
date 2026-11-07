@@ -30,7 +30,7 @@ func Activate(device *wca.IMMDevice, iid *ole.GUID, ctx uint32, params *wca.PROP
 		return fmt.Errorf("IMMDevice::Activate: output must be a non-nil pointer")
 	}
 
-	hr, _, _ := syscall.Syscall6(
+	hr, _, _ := nativeCall6(
 		device.VTable().Activate,
 		5,
 		uintptr(unsafe.Pointer(device)),
@@ -55,7 +55,7 @@ func DeviceID(device *wca.IMMDevice) (string, error) {
 	}
 
 	var id *uint16
-	hr, _, _ := syscall.Syscall(
+	hr, _, _ := nativeCall(
 		device.VTable().GetId,
 		2,
 		uintptr(unsafe.Pointer(device)),
@@ -93,7 +93,7 @@ func AudioSessionCount(enumerator *wca.IAudioSessionEnumerator) (int, error) {
 	}
 
 	var count int32
-	hr, _, _ := syscall.Syscall(
+	hr, _, _ := nativeCall(
 		enumerator.VTable().GetCount,
 		2,
 		uintptr(unsafe.Pointer(enumerator)),
@@ -120,7 +120,7 @@ func SimpleAudioVolumeMute(volume *wca.ISimpleAudioVolume) (bool, error) {
 	}
 
 	var muted int32
-	hr, _, _ := syscall.Syscall(
+	hr, _, _ := nativeCall(
 		volume.VTable().GetMute,
 		2,
 		uintptr(unsafe.Pointer(volume)),
@@ -146,7 +146,7 @@ func SetSimpleAudioVolumeMute(volume *wca.ISimpleAudioVolume, muted bool, eventC
 	if muted {
 		nativeMuted = 1
 	}
-	hr, _, _ := syscall.Syscall(
+	hr, _, _ := nativeCall(
 		volume.VTable().SetMute,
 		3,
 		uintptr(unsafe.Pointer(volume)),
@@ -167,7 +167,7 @@ func EndpointVolumeMute(volume *wca.IAudioEndpointVolume) (bool, error) {
 	}
 
 	var muted int32
-	hr, _, _ := syscall.Syscall(
+	hr, _, _ := nativeCall(
 		volume.VTable().GetMute,
 		2,
 		uintptr(unsafe.Pointer(volume)),
@@ -193,7 +193,7 @@ func SetEndpointVolumeMute(volume *wca.IAudioEndpointVolume, muted bool, eventCo
 	if muted {
 		nativeMuted = 1
 	}
-	hr, _, _ := syscall.Syscall(
+	hr, _, _ := nativeCall(
 		volume.VTable().SetMute,
 		3,
 		uintptr(unsafe.Pointer(volume)),
@@ -206,6 +206,29 @@ func SetEndpointVolumeMute(volume *wca.IAudioEndpointVolume, muted bool, eventCo
 	return hresult("IAudioEndpointVolume::SetMute", hr)
 }
 
+// SimpleAudioVolumeLevel reads a session's normalized 0..1 volume using
+// the native FLOAT output type.
+func SimpleAudioVolumeLevel(volume *wca.ISimpleAudioVolume) (float32, error) {
+	if volume == nil {
+		return 0, fmt.Errorf("ISimpleAudioVolume::GetMasterVolume: nil volume")
+	}
+
+	var level float32
+	hr, _, _ := nativeCall(
+		volume.VTable().GetMasterVolume,
+		2,
+		uintptr(unsafe.Pointer(volume)),
+		uintptr(unsafe.Pointer(&level)),
+		0,
+	)
+	runtime.KeepAlive(volume)
+
+	if err := hresult("ISimpleAudioVolume::GetMasterVolume", hr); err != nil {
+		return 0, err
+	}
+	return level, nil
+}
+
 // EndpointVolumeLevelScalar reads an endpoint's normalized 0..1 volume using
 // the native FLOAT output type.
 func EndpointVolumeLevelScalar(volume *wca.IAudioEndpointVolume) (float32, error) {
@@ -214,7 +237,7 @@ func EndpointVolumeLevelScalar(volume *wca.IAudioEndpointVolume) (float32, error
 	}
 
 	var level float32
-	hr, _, _ := syscall.Syscall(
+	hr, _, _ := nativeCall(
 		volume.VTable().GetMasterVolumeLevelScalar,
 		2,
 		uintptr(unsafe.Pointer(volume)),
@@ -236,7 +259,7 @@ func SetEndpointVolumeLevelScalar(volume *wca.IAudioEndpointVolume, level float3
 		return fmt.Errorf("IAudioEndpointVolume::SetMasterVolumeLevelScalar: nil volume")
 	}
 
-	hr, _, _ := syscall.Syscall(
+	hr, _, _ := nativeCall(
 		volume.VTable().SetMasterVolumeLevelScalar,
 		3,
 		uintptr(unsafe.Pointer(volume)),
@@ -256,7 +279,7 @@ func UnregisterEndpointNotificationCallback(enumerator *wca.IMMDeviceEnumerator,
 		return nil
 	}
 
-	hr, _, _ := syscall.Syscall(
+	hr, _, _ := nativeCall(
 		enumerator.VTable().UnregisterEndpointNotificationCallback,
 		2,
 		uintptr(unsafe.Pointer(enumerator)),
@@ -274,4 +297,21 @@ func hresult(operation string, hr uintptr) error {
 		return fmt.Errorf("%s: %w", operation, ole.NewError(hr))
 	}
 	return nil
+}
+
+// nativeCall and nativeCall6 keep pointer arguments off the moving Go stack.
+// A synchronous Windows call can reenter Go before consuming an output address.
+// KeepAlive alone prevents collection, but does not prevent stack relocation.
+// Keep pointer-to-uintptr conversions directly in these helpers' argument lists;
+// see cmd/compile's documented go:uintptrescapes contract. These helpers do not
+// authorize native code to retain pointers after the call returns.
+//
+//go:uintptrescapes
+func nativeCall(trap, nargs, a1, a2, a3 uintptr) (uintptr, uintptr, syscall.Errno) {
+	return syscall.Syscall(trap, nargs, a1, a2, a3)
+}
+
+//go:uintptrescapes
+func nativeCall6(trap, nargs, a1, a2, a3, a4, a5, a6 uintptr) (uintptr, uintptr, syscall.Errno) {
+	return syscall.Syscall6(trap, nargs, a1, a2, a3, a4, a5, a6)
 }

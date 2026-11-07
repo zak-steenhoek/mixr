@@ -5,6 +5,7 @@ package wincom
 
 import (
 	"math"
+	"runtime"
 	"syscall"
 	"testing"
 	"unsafe"
@@ -14,17 +15,20 @@ import (
 )
 
 var (
+	fakeOutputMoved      bool
 	fakeActivationDevice *wca.IMMDevice
 	fakeActivationIID    *ole.GUID
 	fakeActivationCtx    uintptr
 	fakeActivationParams *wca.PROPVARIANT
 	fakeActivationResult unsafe.Pointer
-	fakeEndpointID       uintptr
+	fakeEndpointID       *uint16
 	fakeSimpleVolume     float32
 	fakeEndpointVolume   float32
 	fakeMuteValue        uintptr
 	fakeMuteContext      uintptr
 	fakeUnregistered     uintptr
+	fakeGrowStack        bool
+	fakeStackMoved       bool
 )
 
 func TestActivateUsesNativeSignature(t *testing.T) {
@@ -74,7 +78,7 @@ func TestDeviceIDUsesNativePointerWidth(t *testing.T) {
 	}
 	buffer := (*[1 << 20]uint16)(unsafe.Pointer(ptr))[:len(text):len(text)]
 	copy(buffer, text)
-	fakeEndpointID = ptr
+	fakeEndpointID = (*uint16)(unsafe.Pointer(ptr))
 
 	vtable := &wca.IMMDeviceVtbl{}
 	vtable.GetId = syscall.NewCallback(fakeGetID)
@@ -118,8 +122,8 @@ func TestVolumeOperationsUseFloat32ABI(t *testing.T) {
 	if fakeSimpleVolume != float32(0.42) {
 		t.Fatalf("simple set volume = %f, want 0.42", fakeSimpleVolume)
 	}
-	var simpleLevel float32
-	if err := simple.GetMasterVolume(&simpleLevel); err != nil {
+	simpleLevel, err := SimpleAudioVolumeLevel(simple)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if simpleLevel != float32(0.37) {
@@ -230,6 +234,7 @@ func TestUnregisterEndpointNotificationCallbackUsesVTableSlot(t *testing.T) {
 // them as uintptr and converting back loses the provenance required by checkptr.
 // These pointer-sized arguments preserve the stdcall/fastcall ABI on 386/amd64.
 func fakeActivate(device *wca.IMMDevice, iid *ole.GUID, ctx uintptr, params *wca.PROPVARIANT, out *unsafe.Pointer) uintptr {
+	growCallbackStack(unsafe.Pointer(out))
 	fakeActivationDevice = device
 	fakeActivationIID = iid
 	fakeActivationCtx = ctx
@@ -238,12 +243,14 @@ func fakeActivate(device *wca.IMMDevice, iid *ole.GUID, ctx uintptr, params *wca
 	return 0
 }
 
-func fakeGetID(_ uintptr, out *uintptr) uintptr {
+func fakeGetID(_ uintptr, out **uint16) uintptr {
+	growCallbackStack(unsafe.Pointer(out))
 	*out = fakeEndpointID
 	return 0
 }
 
 func fakeGetCount(_ uintptr, out *int32) uintptr {
+	growCallbackStack(unsafe.Pointer(out))
 	*out = 7
 	return 0
 }
@@ -254,6 +261,7 @@ func fakeSetSimpleVolume(_, level, _ uintptr) uintptr {
 }
 
 func fakeGetSimpleVolume(_ uintptr, out *float32) uintptr {
+	growCallbackStack(unsafe.Pointer(out))
 	*out = 0.37
 	return 0
 }
@@ -264,11 +272,13 @@ func fakeSetEndpointVolume(_, level, _ uintptr) uintptr {
 }
 
 func fakeGetEndpointVolume(_ uintptr, out *float32) uintptr {
+	growCallbackStack(unsafe.Pointer(out))
 	*out = 0.73
 	return 0
 }
 
 func fakeGetMute(_ uintptr, out *int32) uintptr {
+	growCallbackStack(unsafe.Pointer(out))
 	*out = -1
 	return 0
 }
@@ -288,4 +298,62 @@ func fakeDevice(vtable *wca.IMMDeviceVtbl) *wca.IMMDevice {
 	return &wca.IMMDevice{
 		IUnknown: ole.IUnknown{RawVTable: (*interface{})(unsafe.Pointer(vtable))},
 	}
+}
+
+// Each native invocation starts on a fresh goroutine stack. The callback grows
+// that same stack before writing its output; native uintptr copies cannot be
+// relocated by Go. Tests are sequential because the fixtures share state.
+func TestNativeOutputsSurviveCallbackStackGrowth(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{"Activate", TestActivateUsesNativeSignature},
+		{"DeviceID", TestDeviceIDUsesNativePointerWidth},
+		{"Count", TestAudioSessionCountUsesInt32Output},
+		{"Volume", TestVolumeOperationsUseFloat32ABI},
+		{"Mute", TestMuteOperationsUseWin32BOOL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeGrowStack, fakeStackMoved, fakeOutputMoved = true, false, false
+			defer func() { fakeGrowStack = false }()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				tc.run(t)
+			}()
+			<-done
+			if fakeOutputMoved {
+				t.Error("native output address changed during callback")
+			}
+			if !fakeStackMoved {
+				t.Fatal("callback did not relocate its Go stack")
+			}
+		})
+	}
+}
+
+//go:noinline
+func growCallbackStack(out unsafe.Pointer) {
+	if !fakeGrowStack {
+		return
+	}
+	// Model the address retained by native code. Compare it with the typed
+	// pointer after growth; never reconstruct or dereference this integer.
+	beforeOutput := uintptr(out)
+	var marker byte
+	before := uintptr(unsafe.Pointer(&marker))
+	consumeCallbackStack(128)
+	fakeStackMoved = fakeStackMoved || before != uintptr(unsafe.Pointer(&marker))
+	fakeOutputMoved = fakeOutputMoved || beforeOutput != uintptr(out)
+}
+
+//go:noinline
+func consumeCallbackStack(depth int) {
+	var frame [1024]byte
+	frame[0] = byte(depth)
+	if depth > 0 {
+		consumeCallbackStack(depth - 1)
+	}
+	runtime.KeepAlive(&frame)
 }

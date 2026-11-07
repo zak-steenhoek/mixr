@@ -1,5 +1,9 @@
 # WinCOM callback fixture checkptr investigation
 
+> Follow-up: [pointer lifetime investigation](WINCOM_POINTER_LIFETIME.md) records
+> the subsequent production boundary correction and completed automated matrix.
+> The original observations and failure evidence below are preserved.
+
 ## Scope and status — 2026-11-06
 
 Isolated branch `fix/wincom-checkptr-test` starts at main
