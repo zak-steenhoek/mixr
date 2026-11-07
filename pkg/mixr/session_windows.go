@@ -123,8 +123,8 @@ func (s *wcaSession) CurrentVolume() (float32, error) {
 		return 0, err
 	}
 
-	var level float32
-	if err := s.volume.GetMasterVolume(&level); err != nil {
+	level, err := wincom.SimpleAudioVolumeLevel(s.volume)
+	if err != nil {
 		return 0, fmt.Errorf("get session volume: %w", err)
 	}
 	return level, nil
