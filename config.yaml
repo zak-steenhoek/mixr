@@ -6,16 +6,20 @@
 # windows only - you can use a device's full name, i.e. "Speakers (Realtek High Definition Audio)", to bind it. this works for both output and input devices
 # windows only - you can use 'system' to control the "system sounds" volume
 # important: slider indexes start at 0, regardless of which analog pins you're using!
+# D0 physical channels: A0 master, A1 Spotify, A2 Chrome, A3 Discord.
+# A4 is the separate default-microphone control; do not add it to slider_mapping.
 slider_mapping:
   0: master
   1: spotify.exe
   2: chrome.exe
-  3: deej.current
+  3: discord.exe
 
 # set this to true if you want the controls inverted (i.e. top is 0%, bottom is 100%)
 invert_sliders: false
 
 # settings for connecting to the arduino board
+# Choose the port assigned to your board. COM4 is the portable example;
+# the validated local Nano/soak uses COM5 in its release-bundle config.
 com_port: COM4
 baud_rate: 9600
 
@@ -25,10 +29,8 @@ noise_reduction: default
 
 hardware_mute_prototype:
   enabled: true
-  target: spotify.exe
   five_channel_momentary: true
-  chrome_target: chrome.exe
-  foreground_target: deej.current
+  follow_slider_mapping: true
   poll_interval_ms: 500
   microphone_level_inverted: false
   microphone_level_deadband: 12

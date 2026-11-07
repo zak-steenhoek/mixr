@@ -207,10 +207,35 @@ func TestValidatedRepositoryConfigLoads(t *testing.T) {
 	if config.ConnectionInfo.COMPort != "COM4" || config.ConnectionInfo.BaudRate != 9600 {
 		t.Fatalf("validated serial config changed: %#v", config.ConnectionInfo)
 	}
-	if targets, ok := config.SliderMapping.get(3); !ok || len(targets) != 1 || targets[0] != "deej.current" {
-		t.Fatalf("validated foreground mapping changed: %q present=%t", targets, ok)
+	if len(config.ValidationWarnings) != 0 {
+		t.Fatalf("repository config has validation warnings: %q", config.ValidationWarnings)
 	}
-	if !config.HardwareMutePrototype.FiveChannelMomentary || config.HardwareMutePrototype.ChromeTarget != "chrome.exe" || config.HardwareMutePrototype.ForegroundTarget != "deej.current" {
+	// These are the repository's D0 example targets, not restrictions on user
+	// mappings. Foreground configuration and resolution are tested separately.
+	wantTargets := []string{"master", "spotify.exe", "chrome.exe", "discord.exe"}
+	mappingCount := 0
+	config.SliderMapping.iterate(func(_ int, _ []string) { mappingCount++ })
+	if mappingCount != len(wantTargets) {
+		t.Fatalf("analog mapping count = %d, want %d (A0-A3 only)", mappingCount, len(wantTargets))
+	}
+	for index, want := range wantTargets {
+		if targets, ok := config.SliderMapping.get(index); !ok || len(targets) != 1 || targets[0] != want {
+			t.Errorf("A%d mapping = %q present=%t, want [%q]", index, targets, ok, want)
+		}
+	}
+	if !config.HardwareMutePrototype.Enabled || !config.HardwareMutePrototype.FiveChannelMomentary || !config.HardwareMutePrototype.FollowSliderMapping {
 		t.Fatalf("validated five-channel mute config changed: %#v", config.HardwareMutePrototype)
+	}
+	if config.HardwareMutePrototype.PollInterval != 500*time.Millisecond || config.HardwareMutePrototype.MicrophoneLevelInverted || config.HardwareMutePrototype.MicrophoneLevelDeadband != 12 {
+		t.Fatalf("validated microphone/timing config changed: %#v", config.HardwareMutePrototype)
+	}
+	// Construct controls without starting serial/audio I/O. A4 must remain the
+	// dedicated default microphone rather than a fifth slider_mapping entry.
+	prototype := newHardwareMutePrototype(&Mixr{config: config, serial: &SerialIO{}}, zap.NewNop().Sugar())
+	if _, present := config.SliderMapping.get(4); present {
+		t.Fatal("A4 must remain separate from slider_mapping")
+	}
+	if len(prototype.controlOrder) != 5 || prototype.controls[prototypeMicrophoneMuteControl].target != inputSessionName {
+		t.Fatal("five-channel controls must retain the separate default microphone")
 	}
 }
